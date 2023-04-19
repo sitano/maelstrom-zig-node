@@ -131,4 +131,11 @@ Thanks Aphyr and guys a lot.
 
 [GitHub](https://github.com/sitano/maelstrom-zig-node)
 
+# Links
 
+- https://zig.news/xq/zig-build-explained-part-3-1ima
+- https://zig.news/mattnite/import-and-packages-23mb 
+- https://ziglearn.org/chapter-1/
+- https://ziglang.org/learn/
+- https://ziglang.org/learn/samples/
+- https://ziglang.org/documentation/master/
