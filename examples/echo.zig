@@ -1,7 +1,17 @@
-const std = @import("std");
 const maelstrom = @import("maelstrom");
+const std = @import("std");
+
+var global_instance_state: std.event.Loop = undefined;
+
+// global markers for std.event.loop
+// pub const io_mode = .evented; // auto deducted
+pub const event_loop: *std.event.Loop = &global_instance_state;
 
 pub fn main() !void {
+    try maelstrom.run(event_loop, async_main);
+}
+
+fn async_main() !void {
     // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
 
@@ -12,7 +22,7 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    try stdout.print("Run `zig build test` to run the tests: {d}.\n", .{maelstrom.add(1,2).answer});
+    try stdout.print("Run `zig build test` to run the tests: {d}.\n", .{maelstrom.add(1, 2).answer});
 
     try bw.flush(); // don't forget to flush!
 }

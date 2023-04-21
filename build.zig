@@ -29,7 +29,9 @@ pub fn build_example(b: *std.build.Builder, target: anytype, name: []const u8) v
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const path = std.fmt.allocPrint(b.allocator, "examples/{s}.zig", .{name}) catch { @panic("out of memory"); };
+    const path = std.fmt.allocPrint(b.allocator, "examples/{s}.zig", .{name}) catch {
+        @panic("out of memory");
+    };
     defer b.allocator.free(path);
 
     const exe = b.addExecutable(name, path);
@@ -56,6 +58,14 @@ pub fn build_example(b: *std.build.Builder, target: anytype, name: []const u8) v
 }
 
 pub fn build(b: *std.build.Builder) void {
+    // usr/lib/zig/std/event/loop.zig:16:39: error: async has not been
+    // implemented in the self-hosted compiler yet
+    //
+    // /usr/lib/zig/std/event/loop.zig:16:39: note: to use async enable the
+    // stage1 compiler with either '-fstage1' or by setting '.use_stage1 = true`
+    // in your 'build.zig' script
+    b.use_stage1 = true;
+
     build_lib(b);
 
     // Standard target options allows the person running `zig build` to choose
