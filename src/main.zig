@@ -38,6 +38,10 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
             };
 
             std.debug.print("node started.\n", .{});
+
+            listen(std.io.getStdIn().reader(), rt) catch |e| {
+                std.debug.print("listen loop error: {}", .{e});
+            };
         }
     };
 
@@ -48,14 +52,42 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
     std.debug.print("node finished.\n", .{});
 }
 
+// in: std.io.Reader.{}
+// read buffer is 4kB.
+pub fn listen(in: anytype, runtime: *Runtime) !void {
+    var buffer: [4096]u8 = undefined;
+
+    while (nextLine(in, &buffer)) |try_line| {
+        if (try_line == null) return;
+        const line = try_line.?;
+
+        try runtime.out.writer().print("{s}\n", .{line});
+    } else |err| {
+        return err;
+    }
+}
+
+// reader: std.io.Reader.{}
+fn nextLine(reader: anytype, buffer: []u8) !?[]const u8 {
+    var line = (try reader.readUntilDelimiterOrEof(buffer, '\n')) orelse return null;
+    // trim annoying windows-only carriage return character
+    if (@import("builtin").os.tag == .windows) {
+        return std.mem.trimRight(u8, line, "\r");
+    } else {
+        return line;
+    }
+}
+
 pub const Runtime = struct {
     m: MutexType,
     arena: std.mem.Allocator,
+    out: std.fs.File,
 
     pub fn init(arena: std.mem.Allocator) Runtime {
         return .{
             .m = MutexType{},
             .arena = arena,
+            .out = std.io.getStdOut(),
         };
     }
 
