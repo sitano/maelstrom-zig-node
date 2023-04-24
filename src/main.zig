@@ -3,11 +3,26 @@ const print = @import("std").debug.print;
 const std = @import("std");
 const testing = std.testing;
 
-pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
-    if (builtin.single_threaded) @panic("build is single threaded");
-    if (!std.io.is_async) @panic("io is not async");
+const thread_safe: bool = !builtin.single_threaded;
+const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else DummyMutex{});
 
-    try loop.initMultiThreaded();
+pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
+    // maelstrom requires async io.
+    //
+    // to tell runtime we want async io define the following in root ns:
+    //     pub const io_mode = .evented; // auto deducted, or
+    //     var global_instance_state: std.event.Loop = undefined;
+    //     pub const event_loop: *std.event.Loop = &global_instance_state;
+    //
+    // async io also requires enabling stage1 compiler.
+    if (!std.io.is_async)
+        @panic("io is not async. see code comment to fix.");
+
+    if (builtin.single_threaded) {
+        try loop.initSingleThreaded();
+    } else {
+        try loop.initMultiThreaded();
+    }
     defer loop.deinit();
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -34,12 +49,12 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
 }
 
 pub const Runtime = struct {
-    m: std.Thread.Mutex,
+    m: MutexType,
     arena: std.mem.Allocator,
 
     pub fn init(arena: std.mem.Allocator) Runtime {
         return .{
-            .m = std.Thread.Mutex{},
+            .m = MutexType{},
             .arena = arena,
         };
     }
@@ -48,6 +63,11 @@ pub const Runtime = struct {
         self.m.lock();
         defer self.m.unlock();
     }
+};
+
+const DummyMutex = struct {
+    fn lock(_: *DummyMutex) void {}
+    fn unlock(_: *DummyMutex) void {}
 };
 
 pub const Result = struct {
