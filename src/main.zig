@@ -6,6 +6,10 @@ const testing = std.testing;
 const thread_safe: bool = !builtin.single_threaded;
 const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else DummyMutex{});
 
+// TODO: override log function, let env set level
+const mlog = @import("log.zig");
+pub const default_log_fn = mlog.log;
+
 pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
     // maelstrom requires async io.
     //
@@ -31,16 +35,18 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
     var runtime = Runtime.init(arena.allocator());
     defer runtime.deinit();
 
+    // try mlog.init_log_level(runtime.arena);
+
     const Wrapper = struct {
         fn run(rt: *Runtime) void {
             func(rt) catch |e| {
                 std.debug.panic("main func error: {}", .{e});
             };
 
-            std.debug.print("node started.\n", .{});
+            std.log.info("node started.", .{});
 
             listen(std.io.getStdIn().reader(), rt) catch |e| {
-                std.debug.print("listen loop error: {}", .{e});
+                std.log.err("listen loop error: {}", .{e});
             };
         }
     };
@@ -49,7 +55,7 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
 
     loop.run();
 
-    std.debug.print("node finished.\n", .{});
+    std.log.info("node finished.", .{});
 }
 
 // in: std.io.Reader.{}
