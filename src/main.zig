@@ -6,9 +6,7 @@ const testing = std.testing;
 const thread_safe: bool = !builtin.single_threaded;
 const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else DummyMutex{});
 
-// TODO: override log function, let env set level
-const mlog = @import("log.zig");
-pub const default_log_fn = mlog.log;
+pub const log = @import("log.zig");
 
 pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
     // maelstrom requires async io.
@@ -88,6 +86,7 @@ pub const Runtime = struct {
     m: MutexType,
     arena: std.mem.Allocator,
     out: std.fs.File,
+    // log: TODO: @TypeOf(Scoped)
 
     pub fn init(arena: std.mem.Allocator) Runtime {
         return .{

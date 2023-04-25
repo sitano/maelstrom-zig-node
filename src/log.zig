@@ -1,21 +1,11 @@
-const std = @import("std");
+const builtin = @import("builtin");
 const root = @import("root");
+const std = @import("std");
 
-// root.log_level : std.log.Level = .debug;
-//
-// /// The current log level. This is set to root.log_level if present, otherwise
-// /// log.default_level.
-// pub const is_level_root_defined = @hasDecl(root, "log_level");
-//
-// pub fn init_log_level(allocator: std.mem.Allocator) !void {
-//     if (is_level_root_defined) {
-//         std.log.level = root.log_level;
-//     } else if (try std.process.hasEnvVar(allocator, "LOG_LEVEL")) {
-//         std.log.level = std.log.default_level;
-//     } else {
-//         std.log.level = std.log.default_level;
-//     }
-// }
+// pub const log = maelstrom.log.f;
+// pub const log_level : std.log.Level = .debug;
+
+pub const f = log;
 
 pub fn log(
     comptime message_level: std.log.Level,
@@ -23,9 +13,24 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    _ = message_level;
-    _ = scope;
-    _ = format;
-    _ = args;
-    // Implementation here
+    if (builtin.os.tag == .freestanding)
+        @compileError(
+            \\freestanding targets do not have I/O configured;
+            \\please provide at least an empty `log` function declaration
+        );
+
+    const ts = std.time.nanoTimestamp();
+    const ns = @intCast(u64, @mod(ts, 1000000));
+    const ms = @intCast(u64, @mod(@divTrunc(ts, 1000000), 1000));
+    const ss = @divTrunc(ts, 1000000000);
+
+    const level_txt = " " ++ message_level.asText();
+    const prefix2 = " " ++ if (scope == .default) "default" else @tagName(scope);
+
+    const stderr = std.io.getStdErr().writer();
+
+    std.debug.getStderrMutex().lock();
+    defer std.debug.getStderrMutex().unlock();
+
+    nosuspend stderr.print("[{} {d:0>3}.{d:0>6}" ++ level_txt ++ prefix2 ++ "] " ++ format ++ "\n", .{ ss, ms, ns } ++ args) catch return;
 }

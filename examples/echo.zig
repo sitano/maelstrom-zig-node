@@ -1,6 +1,9 @@
 const maelstrom = @import("maelstrom");
 const std = @import("std");
 
+pub const log = maelstrom.log.f;
+pub const log_level = .debug;
+
 var global_instance_state: std.event.Loop = undefined;
 
 // global markers for std.event.loop
