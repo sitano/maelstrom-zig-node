@@ -33,8 +33,6 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
     var runtime = Runtime.init(arena.allocator());
     defer runtime.deinit();
 
-    // try mlog.init_log_level(runtime.arena);
-
     const Wrapper = struct {
         fn run(rt: *Runtime) void {
             func(rt) catch |e| {
@@ -65,7 +63,7 @@ pub fn listen(in: anytype, runtime: *Runtime) !void {
         if (try_line == null) return;
         const line = try_line.?;
 
-        try runtime.out.writer().print("{s}\n", .{line});
+        try runtime.send_raw("{s}", .{line});
     } else |err| {
         return err;
     }
@@ -85,15 +83,27 @@ fn nextLine(reader: anytype, buffer: []u8) !?[]const u8 {
 pub const Runtime = struct {
     m: MutexType,
     arena: std.mem.Allocator,
+
+    outm: std.Thread.Mutex,
     out: std.fs.File,
+
     // log: TODO: @TypeOf(Scoped)
 
     pub fn init(arena: std.mem.Allocator) Runtime {
         return .{
             .m = MutexType{},
             .arena = arena,
+
+            .outm = std.Thread.Mutex{},
             .out = std.io.getStdOut(),
         };
+    }
+
+    pub fn send_raw(self: *Runtime, comptime fmt: []const u8, args: anytype) !void {
+        self.outm.lock();
+        defer self.outm.unlock();
+        const out = self.out.writer();
+        return out.print(fmt ++ "\n", args);
     }
 
     pub fn deinit(self: *Runtime) void {
