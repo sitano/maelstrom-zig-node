@@ -38,7 +38,7 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
 
             std.log.info("node started.", .{});
 
-            listen(std.io.getStdIn().reader(), runtime) catch |e| {
+            runtime.listen(std.io.getStdIn().reader()) catch |e| {
                 std.log.err("listen loop error: {}", .{e});
             };
         }
@@ -49,30 +49,4 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
     loop.run();
 
     std.log.info("node finished.", .{});
-}
-
-// in: std.io.Reader.{}
-// read buffer is 4kB.
-pub fn listen(in: anytype, runtime: *Runtime) !void {
-    var buffer: [4096]u8 = undefined;
-
-    while (nextLine(in, &buffer)) |try_line| {
-        if (try_line == null) return;
-        const line = try_line.?;
-
-        try runtime.send_raw("{s}", .{line});
-    } else |err| {
-        return err;
-    }
-}
-
-// reader: std.io.Reader.{}
-fn nextLine(reader: anytype, buffer: []u8) !?[]const u8 {
-    var line = (try reader.readUntilDelimiterOrEof(buffer, '\n')) orelse return null;
-    // trim annoying windows-only carriage return character
-    if (@import("builtin").os.tag == .windows) {
-        return std.mem.trimRight(u8, line, "\r");
-    } else {
-        return line;
-    }
 }

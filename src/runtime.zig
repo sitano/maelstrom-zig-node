@@ -37,9 +37,35 @@ pub const Runtime = struct {
         self.m.lock();
         defer self.m.unlock();
     }
+
+    // in: std.io.Reader.{}
+    // read buffer is 4kB.
+    pub fn listen(self: *Runtime, in: anytype) !void {
+        var buffer: [4096]u8 = undefined;
+
+        while (nextLine(in, &buffer)) |try_line| {
+            if (try_line == null) return;
+            const line = try_line.?;
+
+            try self.send_raw("{s}", .{line});
+        } else |err| {
+            return err;
+        }
+    }
 };
 
 const DummyMutex = struct {
     fn lock(_: *DummyMutex) void {}
     fn unlock(_: *DummyMutex) void {}
 };
+
+// reader: std.io.Reader.{}
+fn nextLine(reader: anytype, buffer: []u8) !?[]const u8 {
+    var line = (try reader.readUntilDelimiterOrEof(buffer, '\n')) orelse return null;
+    // trim annoying windows-only carriage return character
+    if (@import("builtin").os.tag == .windows) {
+        return std.mem.trimRight(u8, line, "\r");
+    } else {
+        return line;
+    }
+}
