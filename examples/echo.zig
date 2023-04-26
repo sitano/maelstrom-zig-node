@@ -27,7 +27,7 @@ fn async_main(runtime: *maelstrom.Runtime) !void {
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    try stdout.print("Run `zig build test` to run the tests: {d}.\n", .{maelstrom.add(1, 2).answer});
+    try stdout.print("Run `zig build test` to run the tests: {d}.\n", .{5});
 
     try bw.flush(); // don't forget to flush!
 }
