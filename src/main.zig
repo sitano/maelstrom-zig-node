@@ -27,10 +27,10 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
     }
     defer loop.deinit();
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    var alloc = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = alloc.deinit();
 
-    var runtime = Runtime.init(arena.allocator());
+    var runtime = Runtime.init(alloc.allocator());
     defer runtime.deinit();
 
     const Wrapper = struct {
@@ -47,7 +47,7 @@ pub fn run(loop: *std.event.Loop, comptime func: anytype) !void {
         }
     };
 
-    try loop.runDetached(runtime.arena, Wrapper.run, .{&runtime});
+    try loop.runDetached(runtime.alloc, Wrapper.run, .{&runtime});
 
     loop.run();
 
@@ -81,21 +81,24 @@ fn nextLine(reader: anytype, buffer: []u8) !?[]const u8 {
 }
 
 pub const Runtime = struct {
-    m: MutexType,
-    arena: std.mem.Allocator,
+    // thread-safe by itself
+    alloc: std.mem.Allocator,
 
     outm: std.Thread.Mutex,
     out: std.fs.File,
 
+    m: MutexType,
     // log: TODO: @TypeOf(Scoped)
 
-    pub fn init(arena: std.mem.Allocator) Runtime {
+    // alloc is expected to be thread-safe by itself.
+    pub fn init(alloc: std.mem.Allocator) Runtime {
         return .{
-            .m = MutexType{},
-            .arena = arena,
+            .alloc = alloc,
 
             .outm = std.Thread.Mutex{},
             .out = std.io.getStdOut(),
+
+            .m = MutexType{},
         };
     }
 
