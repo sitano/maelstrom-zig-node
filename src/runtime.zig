@@ -1,8 +1,11 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const proto = @import("protocol.zig");
 
 pub const thread_safe: bool = !builtin.single_threaded;
 pub const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else DummyMutex{});
+
+pub const ReadBufSize = 4096;
 
 pub const Runtime = struct {
     // thread-safe by itself
@@ -41,11 +44,16 @@ pub const Runtime = struct {
     // in: std.io.Reader.{}
     // read buffer is 4kB.
     pub fn listen(self: *Runtime, in: anytype) !void {
-        var buffer: [4096]u8 = undefined;
+        var buffer: [ReadBufSize]u8 = undefined;
 
         while (nextLine(in, &buffer)) |try_line| {
             if (try_line == null) return;
             const line = try_line.?;
+
+            var ap = std.heap.ArenaAllocator.init(self.alloc);
+            var m = try proto.parse_message(&ap, line);
+            std.log.info(">> {}", .{m});
+            ap.deinit();
 
             try self.send_raw("{s}", .{line});
         } else |err| {
