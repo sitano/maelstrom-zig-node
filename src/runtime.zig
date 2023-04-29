@@ -6,6 +6,7 @@ const std = @import("std");
 pub const thread_safe: bool = !builtin.single_threaded;
 pub const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else DummyMutex{});
 
+// FIXME: what we can do about those?
 pub const read_buf_size = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else 4096;
 pub const write_buf_size = if (@hasDecl(root, "write_buf_size")) root.write_buf_size else 4096;
 
@@ -64,12 +65,19 @@ pub const Runtime = struct {
             if (try_line == null) return;
             const line = try_line.?;
 
-            var ap = std.heap.ArenaAllocator.init(self.alloc);
-            var m = try proto.parse_message(&ap, line);
-            std.log.info(">> {}", .{m});
-            ap.deinit();
+            if (line.len == 0) continue;
+            std.log.debug("Received {s}", .{line});
 
-            self.send_raw("{s}", .{line});
+            var ap = std.heap.ArenaAllocator.init(self.alloc);
+            if (proto.parse_message(&ap, line)) |m| {
+                std.log.info(">> {}", .{m});
+
+                // TODO: remove this
+                self.send_raw("{s}", .{line});
+            } else |err| {
+                std.log.err("incoming message parsing error: {}", .{err});
+            }
+            ap.deinit();
         } else |err| {
             return err;
         }
