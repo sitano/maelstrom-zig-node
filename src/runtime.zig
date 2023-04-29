@@ -30,11 +30,23 @@ pub const Runtime = struct {
         };
     }
 
-    pub fn send_raw(self: *Runtime, comptime fmt: []const u8, args: anytype) !void {
+    pub fn send_raw(self: *Runtime, comptime fmt: []const u8, args: anytype) void {
+        if (comptime std.io.is_async) {
+            @panic("async IO in unsupported at least until 0.12.0. we need sync stdout. see the comment below.");
+        }
+
+        const out = self.out.writer();
+
         self.outm.lock();
         defer self.outm.unlock();
-        const out = self.out.writer();
-        return out.print(fmt ++ "\n", args);
+        // stdout.writer().print suspends in async io mode.
+        // on Darwin a suspend point in the middle of mutex causes for 0.10.1:
+        //     Illegal instruction at address 0x7ff80f6c1efc
+        //     ???:?:?: 0x7ff80f6c1efc in ??? (???)
+        //     zig/0.10.1/lib/zig/std/Thread/Mutex.zig:115:40: 0x10f60dd84 in std.Thread.Mutex.DarwinImpl.unlock (echo)
+        //     os.darwin.os_unfair_lock_unlock(&self.oul);
+        // FIXME: check if it works with 0.12.0 + darwin when its ready.
+        nosuspend out.print(fmt ++ "\n", args) catch return;
     }
 
     pub fn deinit(self: *Runtime) void {
@@ -56,7 +68,7 @@ pub const Runtime = struct {
             std.log.info(">> {}", .{m});
             ap.deinit();
 
-            try self.send_raw("{s}", .{line});
+            self.send_raw("{s}", .{line});
         } else |err| {
             return err;
         }
