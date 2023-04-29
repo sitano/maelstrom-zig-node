@@ -7,6 +7,7 @@ pub const thread_safe: bool = !builtin.single_threaded;
 pub const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else DummyMutex{});
 
 pub const read_buf_size = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else 4096;
+pub const write_buf_size = if (@hasDecl(root, "write_buf_size")) root.write_buf_size else 4096;
 
 pub const Runtime = struct {
     // thread-safe by itself

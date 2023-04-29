@@ -1,4 +1,5 @@
 const std = @import("std");
+const root = @import("root");
 
 pub const Message = struct {
     src: []const u8,
@@ -23,6 +24,8 @@ pub const InitMessageBody = struct {
     node_id: []const u8,
     node_ids: [][]const u8,
 };
+
+pub const write_buf_size = if (@hasDecl(root, "write_buf_size")) root.write_buf_size else 4096;
 
 pub fn parse_message(arena: *std.heap.ArenaAllocator, str: []const u8) !*Message {
     return Message.parse_into_arena(arena, str);
@@ -68,32 +71,32 @@ fn MessageMethods(comptime Self: type) type {
 
         pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
             try writer.writeAll("{");
-            
+
             var i: u32 = 0;
             if (value.src.len > 0) {
                 try writer.writeAll(" \"src\": \"");
                 try writer.writeAll(value.src);
                 try writer.writeAll("\"");
                 i += 1;
-            } 
+            }
 
             if (value.dest.len > 0) {
                 if (i > 0) try writer.writeAll(",");
                 try writer.writeAll(" \"dest\": \"");
                 try writer.writeAll(value.dest);
                 try writer.writeAll("\"");
-            } 
+            }
 
             if (i > 0) try writer.writeAll(",");
             try writer.writeAll(" \"body\": ");
             try value.body.format(fmt, options, writer);
-            
+
             try writer.writeAll(" }");
         }
 
         pub fn to_json_value(self: Self, alloc: std.mem.Allocator) !std.json.Value {
-            var v = std.json.Value{ .Object = std.json.ObjectMap.init(alloc)};
-            if (self.src.len > 0)  try v.Object.put("src",  std.json.Value{ .String = self.src });
+            var v = std.json.Value{ .Object = std.json.ObjectMap.init(alloc) };
+            if (self.src.len > 0) try v.Object.put("src", std.json.Value{ .String = self.src });
             if (self.dest.len > 0) try v.Object.put("dest", std.json.Value{ .String = self.dest });
             try v.Object.put("body", try self.to_json_value(alloc));
             return v;
@@ -125,35 +128,31 @@ fn MessageBodyMethods(comptime Self: type) type {
         }
 
         pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-            _ = fmt;
             _ = options;
-
-            try writer.writeAll("{");
-            
-            if (value.typ.len > 0) {
-                try writer.writeAll(" \"type\": ");
-                try std.json.stringify(value.typ, .{}, writer);
-            }
-
-            if (value.msg_id > 0) {
-                try writer.writeAll(", \"msg_id\": ");
-                try std.json.stringify(value.msg_id, .{}, writer);
-            }
-
-            if (value.in_reply_to > 0) {
-                try writer.writeAll(", \"in_reply_to\": ");
-                try std.json.stringify(value.in_reply_to, .{}, writer);
-            }
-
-            // TODO: merge raw
-
-            try writer.writeAll(" }");
+            _ = fmt;
+            var buffer: [write_buf_size]u8 = undefined;
+            var fixed = std.io.fixedBufferStream(&buffer);
+            try std.json.stringify(value.raw, .{}, fixed.writer());
+            try writer.writeAll(buffer[0..fixed.pos]);
         }
 
         pub fn to_json_value(self: Self, alloc: std.mem.Allocator) !std.json.Value {
-            var v = std.json.Value{ .Object = std.json.ObjectMap.init(alloc)};
+            var v = std.json.Value{ .Object = std.json.ObjectMap.init(alloc) };
+
             if (self.typ.len > 0) try v.Object.put("type", std.json.Value{ .String = self.typ });
-            // TODO: ...
+            if (self.msg_id > 0) try v.Object.put("msg_id", std.json.Value{ .Integer = @intCast(u64, self.msg_id) });
+            if (self.in_reply_to > 0) try v.Object.put("in_reply_to", std.json.Value{ .Integer = @intCast(u64, self.in_reply_to) });
+
+            switch (self.raw) {
+                .Object => |inner| {
+                    var it = inner.iterator();
+                    while (it.next()) |entry| {
+                        try v.Object.put(entry.key_ptr.*, entry.value_ptr.*);
+                    }
+                },
+                else => {},
+            }
+
             return v;
         }
     };
