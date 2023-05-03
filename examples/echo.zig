@@ -4,32 +4,9 @@ const std = @import("std");
 pub const log = maelstrom.log.f;
 pub const log_level = .debug;
 
-var global_instance_state: std.event.Loop = undefined;
-
-// global markers for std.event.loop
-// pub const io_mode = .evented; // auto deducted
-pub const event_loop: *std.event.Loop = &global_instance_state;
-
 pub fn main() !void {
-    try maelstrom.run(event_loop, async_main);
-}
-
-fn async_main(runtime: *maelstrom.Runtime) !void {
-    _ = runtime;
-
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
-
-    try stdout.print("Run `zig build test` to run the tests: {d}.\n", .{5});
-
-    try bw.flush(); // don't forget to flush!
+    var runtime = maelstrom.Runtime.init();
+    try runtime.run();
 }
 
 test "simple test" {

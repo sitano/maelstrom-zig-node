@@ -64,7 +64,8 @@ pub fn build(b: *std.build.Builder) void {
     // /usr/lib/zig/std/event/loop.zig:16:39: note: to use async enable the
     // stage1 compiler with either '-fstage1' or by setting '.use_stage1 = true`
     // in your 'build.zig' script
-    b.use_stage1 = true;
+    //
+    // no needed any more: b.use_stage1 = true;
 
     build_lib(b);
 

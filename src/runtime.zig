@@ -10,6 +10,8 @@ pub const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else Dum
 pub const read_buf_size = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else 4096;
 pub const write_buf_size = if (@hasDecl(root, "write_buf_size")) root.write_buf_size else 4096;
 
+var _gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
 pub const Runtime = struct {
     // thread-safe by itself
     alloc: std.mem.Allocator,
@@ -20,8 +22,12 @@ pub const Runtime = struct {
     m: MutexType,
     // log: TODO: @TypeOf(Scoped)
 
+    pub fn init() Runtime {
+        return initWithAllocator(_gpa.allocator());
+    }
+
     // alloc is expected to be thread-safe by itself.
-    pub fn init(alloc: std.mem.Allocator) Runtime {
+    pub fn initWithAllocator(alloc: std.mem.Allocator) Runtime {
         return .{
             .alloc = alloc,
 
@@ -47,6 +53,7 @@ pub const Runtime = struct {
         //     ???:?:?: 0x7ff80f6c1efc in ??? (???)
         //     zig/0.10.1/lib/zig/std/Thread/Mutex.zig:115:40: 0x10f60dd84 in std.Thread.Mutex.DarwinImpl.unlock (echo)
         //     os.darwin.os_unfair_lock_unlock(&self.oul);
+        //
         // FIXME: check if it works with 0.12.0 + darwin when its ready.
         nosuspend out.print(fmt ++ "\n", args) catch return;
     }
@@ -81,6 +88,18 @@ pub const Runtime = struct {
         } else |err| {
             return err;
         }
+    }
+
+    pub fn run(self: *Runtime) !void {
+        // TODO: provide thread pool and job queue
+
+        std.log.info("node started.", .{});
+
+        self.listen(std.io.getStdIn().reader()) catch |e| {
+            std.log.err("listen loop error: {}", .{e});
+        };
+
+        std.log.info("node finished.", .{});
     }
 };
 

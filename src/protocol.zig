@@ -128,12 +128,10 @@ fn MessageBodyMethods(comptime Self: type) type {
         }
 
         pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-            _ = options;
             _ = fmt;
-            var buffer: [write_buf_size]u8 = undefined;
-            var fixed = std.io.fixedBufferStream(&buffer);
-            try std.json.stringify(value.raw, .{}, fixed.writer());
-            try writer.writeAll(buffer[0..fixed.pos]);
+            _ = options;
+            // FIXME: this does not work in async IO until this fixed: https://github.com/ziglang/zig/issues/4060.
+            try nosuspend std.json.stringify(value.raw, .{}, writer);
         }
 
         pub fn to_json_value(self: Self, alloc: std.mem.Allocator) !std.json.Value {

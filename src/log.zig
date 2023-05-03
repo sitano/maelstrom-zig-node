@@ -24,7 +24,7 @@ pub fn log(
     const ms = @intCast(u64, @mod(@divTrunc(ts, 1000000), 1000));
     const ss = @divTrunc(ts, 1000000000);
 
-    const level_txt = " " ++ message_level.asText();
+    const level_txt = " " ++ comptime message_level.asText();
     const prefix2 = " " ++ if (scope == .default) "default" else @tagName(scope);
 
     const stderr = std.io.getStdErr().writer();
