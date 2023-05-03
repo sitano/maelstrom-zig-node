@@ -53,9 +53,8 @@ fn MessageMethods(comptime Self: type) type {
             if (src0 == null) return self;
             const src = src0.?;
 
-            // TODO: replace .? with something safe
-            self.src = src.Object.get("src").?.String;
-            self.dest = src.Object.get("dest").?.String;
+            self.src = try_json_string(src.Object.get("src"));
+            self.dest = try_json_string(src.Object.get("dest"));
             _ = try self.body.from_json(src.Object.get("body"));
 
             return self;

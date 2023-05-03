@@ -77,10 +77,8 @@ pub const Runtime = struct {
 
             var ap = std.heap.ArenaAllocator.init(self.alloc);
             if (proto.parse_message(&ap, line)) |m| {
-                std.log.info(">> {}", .{m});
-
-                // TODO: remove this
-                self.send_raw("{s}", .{line});
+                // TODO: ...
+                _ = m;
             } else |err| {
                 std.log.err("incoming message parsing error: {}", .{err});
             }
