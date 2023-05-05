@@ -1,4 +1,5 @@
 const builtin = @import("builtin");
+const pool = @import("pool.zig");
 const proto = @import("protocol.zig");
 const root = @import("root");
 const std = @import("std");
@@ -10,32 +11,46 @@ pub const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else Dum
 pub const read_buf_size = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else 4096;
 pub const write_buf_size = if (@hasDecl(root, "write_buf_size")) root.write_buf_size else 4096;
 
-var _gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub const Runtime = struct {
+    gpa: ?std.heap.GeneralPurposeAllocator(.{}),
     // thread-safe by itself
     alloc: std.mem.Allocator,
 
     outm: std.Thread.Mutex,
     out: std.fs.File,
 
+    pool: pool.Pool,
+
     m: MutexType,
     // log: TODO: @TypeOf(Scoped)
 
-    pub fn init() Runtime {
-        return initWithAllocator(_gpa.allocator());
+    pub fn init() !*Runtime {
+        return initWithAllocator(null);
     }
 
     // alloc is expected to be thread-safe by itself.
-    pub fn initWithAllocator(alloc: std.mem.Allocator) Runtime {
-        return .{
-            .alloc = alloc,
+    pub fn initWithAllocator(alloc: ?std.mem.Allocator) !*Runtime {
+        var runtime: *Runtime = undefined;
+        
+        if (alloc) |a| {
+            runtime = try a.create(Runtime);
+            runtime.gpa = null;
+            runtime.alloc = a;
+        } else {
+            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-            .outm = std.Thread.Mutex{},
-            .out = std.io.getStdOut(),
+            runtime = try gpa.allocator().create(Runtime);
+            runtime.gpa = gpa;
+            runtime.alloc = runtime.gpa.?.allocator();
+        }
 
-            .m = MutexType{},
-        };
+        runtime.outm = std.Thread.Mutex{};
+        runtime.out = std.io.getStdOut();
+        runtime.pool = try pool.Pool.init(runtime.alloc, @max(2, @min(4, try std.Thread.getCpuCount())));
+        runtime.m = MutexType{};
+
+        return runtime;
     }
 
     pub fn send_raw(self: *Runtime, comptime fmt: []const u8, args: anytype) void {
@@ -59,8 +74,7 @@ pub const Runtime = struct {
     }
 
     pub fn deinit(self: *Runtime) void {
-        self.m.lock();
-        defer self.m.unlock();
+        self.pool.deinit();
     }
 
     // in: std.io.Reader.{}
@@ -75,21 +89,15 @@ pub const Runtime = struct {
             if (line.len == 0) continue;
             std.log.debug("Received {s}", .{line});
 
-            var ap = std.heap.ArenaAllocator.init(self.alloc);
-            if (proto.parse_message(&ap, line)) |m| {
-                // TODO: ...
-                _ = m;
-            } else |err| {
-                std.log.err("incoming message parsing error: {}", .{err});
-            }
-            ap.deinit();
+            try self.pool.enqueue(self.alloc, line);
         } else |err| {
             return err;
         }
     }
 
     pub fn run(self: *Runtime) !void {
-        // TODO: provide thread pool and job queue
+        try self.pool.start(worker, .{self});
+        defer self.deinit();
 
         std.log.info("node started.", .{});
 
@@ -98,6 +106,35 @@ pub const Runtime = struct {
         };
 
         std.log.info("node finished.", .{});
+    }
+
+    pub fn worker(self: *Runtime) void {
+        const id = std.Thread.getCurrentId();
+
+        std.log.debug("[{d}] worker started.", .{id});
+
+        while (self.pool.queue.get()) |node| {
+            self.process_request_node(node);
+        }
+
+        std.log.debug("[{d}] worker finished.", .{id});
+    }
+
+    fn process_request_node(self: *Runtime, node: *pool.Pool.JobNode) void {
+        defer node.data.arena.deinit();
+
+        const id = std.Thread.getCurrentId();
+
+        _ = self;
+
+        std.log.debug("[{d}] worker: got an item: {s}", .{id, node.data.req});
+
+        if (proto.parse_message(&node.data.arena, node.data.req)) |m| {
+            // TODO: ...
+            _ = m;
+        } else |err| {
+            std.log.err("[{d}] incoming message parsing error {s}, {}", .{id, node.data.req, err});
+        }
     }
 };
 

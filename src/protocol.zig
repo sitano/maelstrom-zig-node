@@ -27,15 +27,16 @@ pub const InitMessageBody = struct {
 
 pub const write_buf_size = if (@hasDecl(root, "write_buf_size")) root.write_buf_size else 4096;
 
-pub fn parse_message(arena: *std.heap.ArenaAllocator, str: []const u8) !*Message {
-    return Message.parse_into_arena(arena, str);
+// buf must be allocated on arena. we would not clean or copy it.
+pub fn parse_message(arena: *std.heap.ArenaAllocator, buf: []u8) !*Message {
+    return Message.parse_into_arena(arena, buf);
 }
 
 fn MessageMethods(comptime Self: type) type {
     return struct {
-        pub fn parse_into_arena(arena: *std.heap.ArenaAllocator, str: []const u8) !*Message {
+        // buf must be allocated on arena. we would not clean or copy it.
+        pub fn parse_into_arena(arena: *std.heap.ArenaAllocator, buf: []u8) !*Message {
             var alloc = arena.allocator();
-            const buf = try alloc.dupe(u8, str);
 
             var parser = std.json.Parser.init(alloc, false);
             defer parser.deinit();

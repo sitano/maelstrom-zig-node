@@ -5,7 +5,7 @@ pub const log = maelstrom.log.f;
 pub const log_level = .debug;
 
 pub fn main() !void {
-    var runtime = maelstrom.Runtime.init();
+    var runtime = try maelstrom.Runtime.init();
     try runtime.run();
 }
 
