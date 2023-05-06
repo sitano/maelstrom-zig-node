@@ -25,7 +25,11 @@ pub const InitMessageBody = struct {
     node_ids: [][]const u8,
 };
 
-pub const write_buf_size = if (@hasDecl(root, "write_buf_size")) root.write_buf_size else 4096;
+pub const ErrorMessageBody = struct {
+    typ: []const u8,
+    code: i32,
+    text: []const u8,
+};
 
 // buf must be allocated on arena. we would not clean or copy it.
 pub fn parse_message(arena: *std.heap.ArenaAllocator, buf: []u8) !*Message {

@@ -1,16 +1,24 @@
 const builtin = @import("builtin");
 const pool = @import("pool.zig");
 const proto = @import("protocol.zig");
+const errors = @import("error.zig");
 const root = @import("root");
 const std = @import("std");
+
+const Message = proto.Message;
+const ErrorMessageBody = proto.ErrorMessageBody;
+const HandlerError = errors.HandlerError;
+const EmptyStringArray = [0][]const u8{};
 
 pub const thread_safe: bool = !builtin.single_threaded;
 pub const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else DummyMutex{});
 
 // FIXME: what we can do about those?
 pub const read_buf_size = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else 4096;
-pub const write_buf_size = if (@hasDecl(root, "write_buf_size")) root.write_buf_size else 4096;
 
+pub const Handler = fn (*Runtime, *Message) HandlerError!void;
+pub const HandlerPtr = *const Handler;
+pub const HandlerMap = std.StringHashMap(HandlerPtr);
 
 pub const Runtime = struct {
     gpa: ?std.heap.GeneralPurposeAllocator(.{}),
@@ -21,9 +29,14 @@ pub const Runtime = struct {
     out: std.fs.File,
 
     pool: pool.Pool,
-
-    m: MutexType,
     // log: TODO: @TypeOf(Scoped)
+
+    handlers: HandlerMap,
+
+    // init state
+    m: MutexType,
+    node_id: []const u8,
+    nodes: [][]const u8,
 
     pub fn init() !*Runtime {
         return initWithAllocator(null);
@@ -32,7 +45,7 @@ pub const Runtime = struct {
     // alloc is expected to be thread-safe by itself.
     pub fn initWithAllocator(alloc: ?std.mem.Allocator) !*Runtime {
         var runtime: *Runtime = undefined;
-        
+
         if (alloc) |a| {
             runtime = try a.create(Runtime);
             runtime.gpa = null;
@@ -48,17 +61,27 @@ pub const Runtime = struct {
         runtime.outm = std.Thread.Mutex{};
         runtime.out = std.io.getStdOut();
         runtime.pool = try pool.Pool.init(runtime.alloc, @max(2, @min(4, try std.Thread.getCpuCount())));
+        runtime.handlers = HandlerMap.init(runtime.alloc);
         runtime.m = MutexType{};
+        runtime.node_id = "";
+        runtime.nodes = &EmptyStringArray;
 
         return runtime;
     }
 
-    pub fn send_raw(self: *Runtime, comptime fmt: []const u8, args: anytype) void {
+    pub fn deinit(self: *Runtime) void {
+        self.pool.deinit();
+        self.handlers.deinit();
+    }
+
+    pub fn send_raw_f(self: *Runtime, comptime fmt: []const u8, args: anytype) void {
         if (comptime std.io.is_async) {
             @panic("async IO in unsupported at least until 0.12.0. we need sync stdout. see the comment below.");
         }
 
         const out = self.out.writer();
+
+        defer std.log.debug("Sent " ++ fmt, args);
 
         self.outm.lock();
         defer self.outm.unlock();
@@ -73,8 +96,41 @@ pub const Runtime = struct {
         nosuspend out.print(fmt ++ "\n", args) catch return;
     }
 
-    pub fn deinit(self: *Runtime) void {
-        self.pool.deinit();
+    pub fn send_raw(self: *Runtime, msg: []u8) void {
+        self.send_raw_f("{s}", .{msg});
+    }
+
+    // msg must support special treatment for arrays and messagebody flattening.
+    // does not support non-struct and non array kinds.
+    //
+    //    runtime.send("n1", .{req.body, msg}) - merges objects.
+    //    runtime.send("n1", req) - flattens req.body.raw
+    //
+    // TODO: implement
+    pub fn send(self: *Runtime, to: []const u8, msg: anytype) !void {
+        _ = msg;
+        _ = to;
+        _ = self;
+    }
+
+    // TODO: implement
+    pub fn send_back(self: *Runtime, req: *Message, msg: anytype) !void {
+        _ = req;
+        _ = msg;
+        _ = self;
+    }
+
+    // TODO: implement
+    pub fn reply(self: *Runtime, req: *Message, resp: anytype) !void {
+        _ = resp;
+        _ = req;
+        _ = self;
+    }
+
+    // TODO: implement
+    pub fn reply_ok(self: *Runtime, req: *Message) !void {
+        _ = req;
+        _ = self;
     }
 
     // in: std.io.Reader.{}
@@ -125,15 +181,24 @@ pub const Runtime = struct {
 
         const id = std.Thread.getCurrentId();
 
-        _ = self;
-
-        std.log.debug("[{d}] worker: got an item: {s}", .{id, node.data.req});
+        std.log.debug("[{d}] worker: got an item: {s}", .{ id, node.data.req });
 
         if (proto.parse_message(&node.data.arena, node.data.req)) |m| {
-            // TODO: ...
-            _ = m;
+            if (self.handlers.get(m.body.typ)) |f| {
+                const res = f(self, m);
+                res catch @panic("ops"); // TODO: implement error handling
+            } else {
+                // TODO: move errors handling into sep f
+                // TODO: API to create responses from errors
+                const res = self.reply(m, ErrorMessageBody{
+                    .typ = "error",
+                    .code = 10,
+                    .text = "not supported",
+                });
+                res catch @panic("ops"); // TODO: implement error handling
+            }
         } else |err| {
-            std.log.err("[{d}] incoming message parsing error {s}, {}", .{id, node.data.req, err});
+            std.log.err("[{d}] incoming message parsing error {s}, {}", .{ id, node.data.req, err });
         }
     }
 };
