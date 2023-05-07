@@ -23,12 +23,16 @@ pub const MessageBody = struct {
 pub const InitMessageBody = struct {
     node_id: []const u8,
     node_ids: [][]const u8,
+
+    pub usingnamespace FormatAsJson(@This());
 };
 
 pub const ErrorMessageBody = struct {
     typ: []const u8,
     code: i32,
     text: []const u8,
+
+    pub usingnamespace FormatAsJson(@This());
 };
 
 // buf must be allocated on arena. we would not clean or copy it.
@@ -131,13 +135,6 @@ fn MessageBodyMethods(comptime Self: type) type {
             };
         }
 
-        pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-            _ = fmt;
-            _ = options;
-            // FIXME: this does not work in async IO until this fixed: https://github.com/ziglang/zig/issues/4060.
-            try nosuspend std.json.stringify(value.raw, .{}, writer);
-        }
-
         pub fn to_json_value(self: Self, alloc: std.mem.Allocator) !std.json.Value {
             var v = std.json.Value{ .Object = std.json.ObjectMap.init(alloc) };
 
@@ -145,17 +142,20 @@ fn MessageBodyMethods(comptime Self: type) type {
             if (self.msg_id > 0) try v.Object.put("msg_id", std.json.Value{ .Integer = @intCast(u64, self.msg_id) });
             if (self.in_reply_to > 0) try v.Object.put("in_reply_to", std.json.Value{ .Integer = @intCast(u64, self.in_reply_to) });
 
-            switch (self.raw) {
-                .Object => |inner| {
-                    var it = inner.iterator();
-                    while (it.next()) |entry| {
-                        try v.Object.put(entry.key_ptr.*, entry.value_ptr.*);
-                    }
-                },
-                else => {},
-            }
+            try merge_json(&v, &self.raw);
 
             return v;
+        }
+    };
+}
+
+fn FormatAsJson(comptime Self: type) type {
+    return struct {
+        pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+            _ = fmt;
+            _ = options;
+            // FIXME: this does not work in async IO until this fixed: https://github.com/ziglang/zig/issues/4060.
+            try nosuspend std.json.stringify(value, .{}, writer);
         }
     };
 }
@@ -174,4 +174,36 @@ fn try_json_u64(val: ?std.json.Value) u64 {
         .Integer => |s| return @intCast(u64, s),
         else => return 0,
     }
+}
+
+pub fn merge_json(dst: *std.json.Value, src: *std.json.Value) !void {
+    switch (dst) {
+        .Object => {},
+        else => return error{InvalidType},
+    }
+
+    switch (src) {
+        .Object => |inner| {
+            var it = inner.iterator();
+            while (it.next()) |entry| {
+                try dst.Object.put(entry.key_ptr.*, entry.value_ptr.*);
+            }
+        },
+        else => {},
+    }
+}
+
+// all allocated memory belongs to the caller.
+// double serialization is not efficient, but we want to be simple right now.
+// until the std lib api will be able to handle it.
+pub fn to_json_value(arena: *std.heap.ArenaAllocator, obj: anytype) !std.json.Value {
+    var alloc = arena.allocator();
+
+    const str = try std.json.stringifyAlloc(alloc, obj, .{});
+
+    var parser = std.json.Parser.init(alloc, false);
+    defer parser.deinit();
+
+    const tree = try parser.parse(str);
+    return tree.root;
 }

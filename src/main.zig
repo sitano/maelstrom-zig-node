@@ -2,8 +2,16 @@ const builtin = @import("builtin");
 const std = @import("std");
 
 pub const log = @import("log.zig");
-const rt = @import("runtime.zig");
-pub const Runtime = rt.Runtime;
+
+const runtime = @import("runtime.zig");
+pub const Runtime = runtime.Runtime;
+
+pub const proto = @import("protocol.zig");
+pub const Message = proto.Message;
+pub const MessageBody = proto.MessageBody;
+
+pub const errors = @import("error.zig");
+pub const Error = errors.Error;
 
 // we did like to use async io but it does not work at least until 0.12.0.
 // see protocol format() issues and mutex+async_print+darwin.

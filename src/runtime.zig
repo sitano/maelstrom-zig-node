@@ -13,7 +13,7 @@ const EmptyStringArray = [0][]const u8{};
 pub const thread_safe: bool = !builtin.single_threaded;
 pub const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else DummyMutex{});
 
-// FIXME: what we can do about those?
+// FIXME: what we can do about those? - move to the heap with BufReader.
 pub const read_buf_size = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else 4096;
 
 pub const Handler = fn (*Runtime, *Message) HandlerError!void;
@@ -74,6 +74,15 @@ pub const Runtime = struct {
         self.handlers.deinit();
     }
 
+    /// handle(type, f) registers a handler for specific message type.
+    pub fn handle(self: *Runtime, msg_type: []const u8, f: HandlerPtr) !void {
+        if (self.handlers.contains(msg_type)) {
+            std.debug.panic("this message type is already registered: {s}", .{msg_type});
+        }
+
+        try self.handlers.put(msg_type, f);
+    }
+
     pub fn send_raw_f(self: *Runtime, comptime fmt: []const u8, args: anytype) void {
         if (comptime std.io.is_async) {
             @panic("async IO in unsupported at least until 0.12.0. we need sync stdout. see the comment below.");
@@ -108,29 +117,29 @@ pub const Runtime = struct {
     //
     // TODO: implement
     pub fn send(self: *Runtime, to: []const u8, msg: anytype) !void {
-        _ = msg;
         _ = to;
         _ = self;
+        std.log.err("NOT IMPLEMENTED: {}", .{msg});
     }
 
     // TODO: implement
     pub fn send_back(self: *Runtime, req: *Message, msg: anytype) !void {
         _ = req;
-        _ = msg;
         _ = self;
+        std.log.err("NOT IMPLEMENTED: {}", .{msg});
     }
 
     // TODO: implement
     pub fn reply(self: *Runtime, req: *Message, resp: anytype) !void {
-        _ = resp;
         _ = req;
         _ = self;
+        std.log.err("NOT IMPLEMENTED: {}", .{resp});
     }
 
     // TODO: implement
     pub fn reply_ok(self: *Runtime, req: *Message) !void {
-        _ = req;
         _ = self;
+        std.log.err("NOT IMPLEMENTED: {}", .{req});
     }
 
     // in: std.io.Reader.{}

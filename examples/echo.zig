@@ -1,17 +1,18 @@
 const maelstrom = @import("maelstrom");
 const std = @import("std");
 
+const Runtime = maelstrom.Runtime;
+const Message = maelstrom.Message;
+const Error = maelstrom.Error;
+
 pub const log = maelstrom.log.f;
 pub const log_level = .debug;
 
 pub fn main() !void {
-    var runtime = try maelstrom.Runtime.init();
+    var runtime = try Runtime.init();
     try runtime.run();
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+fn echo(self: *Runtime, req: *Message) Error!void {
+    try self.reply_ok(req);
 }
