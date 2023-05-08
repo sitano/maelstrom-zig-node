@@ -25,7 +25,6 @@ pub const Runtime = struct {
     // thread-safe by itself
     alloc: std.mem.Allocator,
 
-    outm: std.Thread.Mutex,
     out: std.fs.File,
 
     pool: pool.Pool,
@@ -58,7 +57,6 @@ pub const Runtime = struct {
             runtime.alloc = runtime.gpa.?.allocator();
         }
 
-        runtime.outm = std.Thread.Mutex{};
         runtime.out = std.io.getStdOut();
         runtime.pool = try pool.Pool.init(runtime.alloc, @max(2, @min(4, try std.Thread.getCpuCount())));
         runtime.handlers = HandlerMap.init(runtime.alloc);
@@ -92,8 +90,9 @@ pub const Runtime = struct {
 
         defer std.log.debug("Sent " ++ fmt, args);
 
-        self.outm.lock();
-        defer self.outm.unlock();
+        const m = std.debug.getStderrMutex();
+        m.lock();
+        defer m.unlock();
         // stdout.writer().print suspends in async io mode.
         // on Darwin a suspend point in the middle of mutex causes for 0.10.1:
         //     Illegal instruction at address 0x7ff80f6c1efc
