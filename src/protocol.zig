@@ -203,6 +203,11 @@ pub fn merge_json(dst: *std.json.Value, src: std.json.Value) !void {
 pub fn to_json_value(alloc: std.mem.Allocator, value: anytype) !std.json.Value {
     const T = @TypeOf(value);
     const args_type_info = @typeInfo(T);
+
+    if (args_type_info == .Pointer) {
+        return to_json_value(alloc, value.*);
+    }
+
     if (args_type_info != .Struct) {
         @compileError("expected tuple or struct argument, found " ++ @typeName(T));
     }
@@ -259,12 +264,18 @@ test "merge_to_json works" {
 
     var body = MessageBody.init();
 
-    var dst = try to_json_value(alloc, body);
+    {
+        var dst = try to_json_value(alloc, &body);
+        const str = try std.json.stringifyAlloc(alloc, dst, .{});
+        try std.testing.expectEqualStrings("{}", str);
+    }
 
     {
-        const obj = dst; //try merge_json(&dst, std.json.Value{ .Null = void{} });
-        const str = try std.json.stringifyAlloc(alloc, obj, .{});
-        try std.testing.expectEqualStrings("{}", str);
+        // TODO: merge_json must ignore merging Nulls
+        // var dst = try to_json_value(alloc, body);
+        // const obj = try merge_json(&dst, std.json.Value{ .Null = void{} });
+        // const str = try std.json.stringifyAlloc(alloc, obj, .{});
+        // try std.testing.expectEqualStrings("{}", str);
     }
 
     body.msg_id = 1;
