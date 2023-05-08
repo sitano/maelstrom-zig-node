@@ -136,6 +136,10 @@ pub const Runtime = struct {
         std.log.err("NOT IMPLEMENTED: {}", .{resp});
     }
 
+    pub fn reply_err(self: *Runtime, req: *Message, resp: HandlerError) !void {
+        try self.reply(req, errors.to_message(resp));
+    }
+
     // TODO: implement
     pub fn reply_ok(self: *Runtime, req: *Message) !void {
         _ = self;
@@ -199,11 +203,7 @@ pub const Runtime = struct {
             } else {
                 // TODO: move errors handling into sep f
                 // TODO: API to create responses from errors
-                const res = self.reply(m, ErrorMessageBody{
-                    .typ = "error",
-                    .code = 10,
-                    .text = "not supported",
-                });
+                const res = self.reply_err(m, HandlerError.NotSupported);
                 res catch @panic("ops"); // TODO: implement error handling
             }
         } else |err| {

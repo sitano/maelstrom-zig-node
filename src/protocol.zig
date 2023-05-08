@@ -29,7 +29,7 @@ pub const InitMessageBody = struct {
 
 pub const ErrorMessageBody = struct {
     typ: []const u8,
-    code: i32,
+    code: i64,
     text: []const u8,
 
     pub usingnamespace FormatAsJson(@This());

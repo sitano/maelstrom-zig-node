@@ -1,4 +1,8 @@
-pub const HandlerError = error{
+const std = @import("std");
+const proto = @import("protocol.zig");
+
+/// [source](https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#errors).
+pub const HandlerError = error {
     /// Indicates that the requested operation could not be completed within a timeout.
     Timeout,
     /// Use this error to indicate that a requested operation is not supported by
@@ -42,13 +46,51 @@ pub const HandlerError = error{
     /// they may choose to retry automatically instead.
     TxnConflict,
     /// General error for anything you would like to add.
-    Error,
+    Other,
 };
 
-pub fn handler_error_to_code(err: HandlerError) u64 {
-  switch (err) {
-    // TODO
-  }
+pub fn to_code(err: HandlerError) i64 {
+  return switch (err) {
+    error.Timeout => 0,
+    error.NotSupported => 10,
+    error.TemporarilyUnavailable => 11,
+    error.MalformedRequest => 12,
+    error.Crash => 13,
+    error.Abort => 14,
+    error.KeyDoesNotExist => 20,
+    error.KeyAlreadyExists => 21,
+    error.PreconditionFailed => 22,
+    error.TxnConflict => 30,
+    error.Other => 1000,
+  };
+}
 
-  return 0;
+pub fn to_text(err: HandlerError) []const u8 {
+  return switch (err) {
+    error.Timeout => "timeout",
+    error.NotSupported => "not supported",
+    error.TemporarilyUnavailable => "temporarily unavailable",
+    error.MalformedRequest => "malformed request",
+    error.Crash => "crash",
+    error.Abort => "abort",
+    error.KeyDoesNotExist => "key does not exist",
+    error.KeyAlreadyExists => "key already exists",
+    error.PreconditionFailed => "precondition failed",
+    error.TxnConflict => "txn conflict",
+    error.Other => "user-level error kind",
+  };
+}
+
+pub fn to_message(err: HandlerError) proto.ErrorMessageBody {
+  return proto.ErrorMessageBody {
+    .typ = "error",
+    .code = to_code(err),
+    .text = to_text(err),
+  };
+}
+
+test "error mapping works" {
+  try std.testing.expect(to_code(HandlerError.NotSupported) == 10);
+  try std.testing.expect(std.mem.eql(u8, to_text(HandlerError.NotSupported), "not supported"));
+  try std.testing.expect(to_message(HandlerError.NotSupported).code == 10);
 }
