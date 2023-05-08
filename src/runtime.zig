@@ -105,45 +105,58 @@ pub const Runtime = struct {
         nosuspend out.print(fmt ++ "\n", args) catch return;
     }
 
-    pub fn send_raw(self: *Runtime, msg: []u8) void {
+    pub fn send_raw(self: *Runtime, msg: []const u8) void {
         self.send_raw_f("{s}", .{msg});
     }
 
     // msg must support special treatment for arrays and messagebody flattening.
     // does not support non-struct and non array kinds.
     //
+    //    runtime.send("n1", msg);
     //    runtime.send("n1", .{req.body, msg}) - merges objects.
-    //    runtime.send("n1", req) - flattens req.body.raw
-    //
-    // TODO: implement
     pub fn send(self: *Runtime, to: []const u8, msg: anytype) !void {
-        _ = to;
-        _ = self;
-        std.log.err("NOT IMPLEMENTED: {}", .{msg});
+        var arena = std.heap.ArenaAllocator.init(self.alloc);
+        defer arena.deinit();
+
+        var allocator = arena.allocator();
+        
+        const obj = try proto.to_json_value(allocator, msg);
+
+        var packet = proto.Message{
+            .src = self.node_id,
+            .dest = to,
+            .body = proto.MessageBody.init(),
+        };
+
+        packet.body.raw = obj;
+
+        self.send_raw(try std.json.stringifyAlloc(allocator, packet, .{}));
     }
 
-    // TODO: implement
     pub fn send_back(self: *Runtime, req: *Message, msg: anytype) !void {
-        _ = req;
-        _ = self;
-        std.log.err("NOT IMPLEMENTED: {}", .{msg});
+        try self.send(req.src, msg);
     }
 
-    // TODO: implement
-    pub fn reply(self: *Runtime, req: *Message, resp: anytype) !void {
-        _ = req;
-        _ = self;
-        std.log.err("NOT IMPLEMENTED: {}", .{resp});
+    pub fn reply(self: *Runtime, req: *Message, msg: anytype) !void {
+        var arena = std.heap.ArenaAllocator.init(self.alloc);
+        defer arena.deinit();
+
+        var allocator = arena.allocator();
+        
+        var obj = try proto.to_json_value(allocator, msg);
+        if (!obj.Object.contains("type")) {
+            try obj.Object.put("type", std.json.Value{ .String = try std.fmt.allocPrint(allocator, "{s}_ok", .{req.body.typ}), });
+        }
+
+        try self.send_back(req, msg);
     }
 
     pub fn reply_err(self: *Runtime, req: *Message, resp: HandlerError) !void {
         try self.reply(req, errors.to_message(resp));
     }
 
-    // TODO: implement
     pub fn reply_ok(self: *Runtime, req: *Message) !void {
-        _ = self;
-        std.log.err("NOT IMPLEMENTED: {}", .{req});
+        try self.reply(req, req);
     }
 
     // in: std.io.Reader.{}
@@ -194,9 +207,9 @@ pub const Runtime = struct {
 
         const id = std.Thread.getCurrentId();
 
-        std.log.debug("[{d}] worker: got an item: {s}", .{ id, node.data.req });
+        // std.log.debug("[{d}] worker: got an item: {s}", .{ id, node.data.req });
 
-        if (proto.parse_message(&node.data.arena, node.data.req)) |m| {
+        if (proto.parse_message(node.data.arena.allocator(), node.data.req)) |m| {
             if (self.handlers.get(m.body.typ)) |f| {
                 const res = f(self, m);
                 res catch @panic("ops"); // TODO: implement error handling

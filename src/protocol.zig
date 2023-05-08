@@ -36,16 +36,14 @@ pub const ErrorMessageBody = struct {
 };
 
 // buf must be allocated on arena. we would not clean or copy it.
-pub fn parse_message(arena: *std.heap.ArenaAllocator, buf: []u8) !*Message {
-    return Message.parse_into_arena(arena, buf);
+pub fn parse_message(alloc: std.mem.Allocator, buf: []u8) !*Message {
+    return Message.parse_into_arena(alloc, buf);
 }
 
 fn MessageMethods(comptime Self: type) type {
     return struct {
         // buf must be allocated on arena. we would not clean or copy it.
-        pub fn parse_into_arena(arena: *std.heap.ArenaAllocator, buf: []u8) !*Message {
-            var alloc = arena.allocator();
-
+        pub fn parse_into_arena(alloc: std.mem.Allocator, buf: []u8) !*Message {
             var parser = std.json.Parser.init(alloc, false);
             defer parser.deinit();
 
@@ -202,9 +200,7 @@ pub fn merge_json(dst: *std.json.Value, src: std.json.Value) !void {
 /// double serialization is not efficient, but we want to be simple right now.
 /// until the std lib api will be able to handle it.
 /// support override with to_json_value(Allocator).
-pub fn to_json_value(arena: *std.heap.ArenaAllocator, value: anytype) !std.json.Value {
-    var alloc = arena.allocator();
-
+pub fn to_json_value(alloc: std.mem.Allocator, value: anytype) !std.json.Value {
     const T = @TypeOf(value);
     const args_type_info = @typeInfo(T);
     if (args_type_info != .Struct) {
@@ -225,9 +221,10 @@ pub fn to_json_value(arena: *std.heap.ArenaAllocator, value: anytype) !std.json.
 }
 
 /// merges a set of objects into a json Value.
+/// all allocated memory belongs to the caller.
 ///
 ///     merge_to_json(arena, .{body, .{ .code = 10, .text = "not supported" }});
-pub fn merge_to_json(arena: *std.heap.ArenaAllocator, args: anytype) !std.json.Value {
+pub fn merge_to_json(alloc: std.mem.Allocator, args: anytype) !std.json.Value {
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
     if (args_type_info != .Struct) {
@@ -238,15 +235,15 @@ pub fn merge_to_json(arena: *std.heap.ArenaAllocator, args: anytype) !std.json.V
     const len = comptime fields_info.len;
 
     if (len == 0) {
-        return std.json.Value{ .Object = std.json.ObjectMap.init(arena) };
+        return std.json.Value{ .Object = std.json.ObjectMap.init(alloc) };
     }
 
     comptime var i: usize = 0;
-    var obj = try to_json_value(arena, @field(args, fields_info[i].name));
+    var obj = try to_json_value(alloc, @field(args, fields_info[i].name));
 
     i += 1;
     inline while (i < len) {
-        var src = try to_json_value(arena, @field(args, fields_info[i].name));
+        var src = try to_json_value(alloc, @field(args, fields_info[i].name));
         try merge_json(&obj, src);
         i += 1;
     }
@@ -258,31 +255,33 @@ test "merge_to_json works" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
+    var alloc = arena.allocator();
+
     var body = MessageBody.init();
 
-    var dst = try to_json_value(&arena, body);
+    var dst = try to_json_value(alloc, body);
 
     {
         const obj = dst; //try merge_json(&dst, std.json.Value{ .Null = void{} });
-        const str = try std.json.stringifyAlloc(arena.allocator(), obj, .{});
+        const str = try std.json.stringifyAlloc(alloc, obj, .{});
         try std.testing.expectEqualStrings("{}", str);
     }
 
     body.msg_id = 1;
     body.in_reply_to = 2;
     body.typ = "init";
-    body.raw = std.json.Value{ .Object = std.json.ObjectMap.init(arena.allocator()) };
+    body.raw = std.json.Value{ .Object = std.json.ObjectMap.init(alloc) };
     try body.raw.Object.put("raw_key", std.json.Value{ .Integer = 1 });
 
     {
-        const obj = try to_json_value(&arena, body);
-        const str = try std.json.stringifyAlloc(arena.allocator(), obj, .{});
+        const obj = try to_json_value(alloc, body);
+        const str = try std.json.stringifyAlloc(alloc, obj, .{});
         try std.testing.expectEqualStrings("{\"type\":\"init\",\"msg_id\":1,\"in_reply_to\":2,\"raw_key\":1}", str);
     }
 
     {
-        const obj = try merge_to_json(&arena, .{ body, .{ .msg_id = 2, .text = "bbb" } });
-        const str = try std.json.stringifyAlloc(arena.allocator(), obj, .{});
+        const obj = try merge_to_json(alloc, .{ body, .{ .msg_id = 2, .text = "bbb" } });
+        const str = try std.json.stringifyAlloc(alloc, obj, .{});
         try std.testing.expectEqualStrings("{\"type\":\"init\",\"msg_id\":2,\"in_reply_to\":2,\"raw_key\":1,\"text\":\"bbb\"}", str);
     }
 }
