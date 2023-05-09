@@ -16,7 +16,7 @@ pub const MutexType: type = @TypeOf(if (thread_safe) std.Thread.Mutex{} else Dum
 // FIXME: what we can do about those? - move to the heap with BufReader.
 pub const read_buf_size = if (@hasDecl(root, "read_buf_size")) root.read_buf_size else 4096;
 
-pub const Handler = fn (*Runtime, *Message) HandlerError!void;
+pub const Handler = fn (ScopedRuntime, *Message) HandlerError!void;
 pub const HandlerPtr = *const Handler;
 pub const HandlerMap = std.StringHashMap(HandlerPtr);
 
@@ -113,14 +113,8 @@ pub const Runtime = struct {
     //
     //    runtime.send("n1", msg);
     //    runtime.send("n1", .{req.body, msg}) - merges objects.
-    pub fn send(self: *Runtime, to: []const u8, msg: anytype) !void {
-        // TODO: shall allocate to the request arenas.
-        var arena = std.heap.ArenaAllocator.init(self.alloc);
-        defer arena.deinit();
-
-        var allocator = arena.allocator();
-        
-        const body = try proto.to_json_value(allocator, msg);
+    pub fn send(self: *Runtime, alloc: std.mem.Allocator, to: []const u8, msg: anytype) !void {
+        const body = try proto.to_json_value(alloc, msg);
 
         var packet = proto.Message{
             .src = self.node_id,
@@ -130,8 +124,8 @@ pub const Runtime = struct {
 
         packet.body.raw = body;
 
-        var obj = try proto.to_json_value(allocator, packet);
-        const str = try std.json.stringifyAlloc(allocator, obj, .{});
+        var obj = try proto.to_json_value(alloc, packet);
+        const str = try std.json.stringifyAlloc(alloc, obj, .{});
 
         self.send_raw(str);
 
@@ -140,32 +134,29 @@ pub const Runtime = struct {
         }
     }
 
-    pub fn send_back(self: *Runtime, req: *Message, msg: anytype) !void {
-        // TODO: shall allocate to the request arenas.
-        try self.send(req.src, msg);
+    pub fn send_back(self: *Runtime, alloc0: std.mem.Allocator, req: *Message, msg: anytype) !void {
+        try self.send(alloc0, req.src, msg);
     }
 
-    pub fn reply(self: *Runtime, req: *Message, msg: anytype) !void {
-        // TODO: shall allocate to the request arenas.
-        var arena = std.heap.ArenaAllocator.init(self.alloc);
-        defer arena.deinit();
-
-        var allocator = arena.allocator();
-
-        var obj = try proto.to_json_value(allocator, msg);
+    pub fn reply(self: *Runtime, alloc: std.mem.Allocator, req: *Message, msg: anytype) !void {
+        var obj = try proto.to_json_value(alloc, msg);
         if (!obj.Object.contains("type")) {
-            try obj.Object.put("type", std.json.Value{ .String = try std.fmt.allocPrint(allocator, "{s}_ok", .{req.body.typ}), });
+            try obj.Object.put("type", std.json.Value{ .String = try std.fmt.allocPrint(alloc, "{s}_ok", .{req.body.typ}), });
         }
 
-        try self.send(req.src, msg);
+        try self.send(alloc, req.src, msg);
     }
 
-    pub fn reply_err(self: *Runtime, req: *Message, resp: HandlerError) !void {
-        try self.reply(req, errors.to_message(resp));
+    pub fn reply_err(self: *Runtime, alloc: std.mem.Allocator, req: *Message, resp: HandlerError) !void {
+        var obj = errors.to_message(resp);
+        if (resp == HandlerError.NotSupported) {
+            obj.text = try std.fmt.allocPrint(alloc, "not supported: {s}", .{req.body.typ});
+        }
+        try self.reply(alloc, req, obj);
     }
 
-    pub fn reply_ok(self: *Runtime, req: *Message) !void {
-        try self.reply(req, req);
+    pub fn reply_ok(self: *Runtime, alloc: std.mem.Allocator, req: *Message) !void {
+        try self.reply(alloc, req, req);
     }
 
     // in: std.io.Reader.{}
@@ -220,19 +211,77 @@ pub const Runtime = struct {
 
         // std.log.debug("[{d}] worker: got an item: {s}", .{ id, node.data.req });
 
-        if (proto.parse_message(node.data.arena.allocator(), node.data.req)) |m| {
-            if (self.handlers.get(m.body.typ)) |f| {
-                const res = f(self, m);
-                res catch @panic("ops"); // TODO: implement error handling
+        if (proto.parse_message(node.data.arena.allocator(), node.data.req)) |req| {
+            var scoped = ScopedRuntime.init(self, node, id);
+            if (self.handlers.get(req.body.typ)) |f| {
+                f(scoped, req) catch |err| {
+                    process_respond_err(scoped, req, err);
+                };
             } else {
-                // TODO: move errors handling into sep f
-                // TODO: API to create responses from errors
-                const res = self.reply_err(m, HandlerError.NotSupported);
-                res catch @panic("ops"); // TODO: implement error handling
+                process_respond_err(scoped, req, HandlerError.NotSupported);
             }
         } else |err| {
-            std.log.err("[{d}] incoming message parsing error {s}, {}", .{ id, node.data.req, err });
+            std.log.err("[{d}] incoming message parsing error {s}: {}", .{ id, node.data.req, err });
         }
+    }
+
+    fn process_respond_err(self: ScopedRuntime, req: *Message, resp: HandlerError) void {
+        self.reply_err(req, resp) catch |err| {
+            std.log.err("[{d}] responding with an error {} error {s}: {}", .{ self.worker_id, resp, req, err });
+        };
+    }
+};
+
+/// Proxy class for the context of (runtime, allocator scoped to the current request).
+pub const ScopedRuntime = struct {
+    runtime: *Runtime,
+    alloc: std.mem.Allocator,
+    worker_id: usize,
+
+    node_id: []const u8,
+    nodes: [][]const u8,
+
+    pub fn init(runtime: *Runtime, node: *pool.Pool.JobNode, worker_id: usize) ScopedRuntime {
+        return ScopedRuntime{
+            .runtime = runtime,
+            .worker_id = worker_id,
+            .alloc = node.data.arena.allocator(),
+            .node_id = runtime.node_id,
+            .nodes = runtime.nodes,
+        };
+    }
+
+    pub inline fn send_raw_f(self: ScopedRuntime, comptime fmt: []const u8, args: anytype) void {
+        self.runtime.send_raw_f(fmt, args);
+    }
+
+    pub inline fn send_raw(self: ScopedRuntime, msg: []const u8) void {
+        self.runtime.send_raw(msg);
+    }
+
+    // msg must support special treatment for arrays and messagebody flattening.
+    // does not support non-struct and non array kinds.
+    //
+    //    runtime.send("n1", msg);
+    //    runtime.send("n1", .{req.body, msg}) - merges objects.
+    pub inline fn send(self: ScopedRuntime, to: []const u8, msg: anytype) !void {
+        try self.runtime.send(self.alloc, to, msg);
+    }
+
+    pub inline fn send_back(self: ScopedRuntime, req: *Message, msg: anytype) !void {
+        try self.runtime.send_back(self.alloc, req, msg);
+    }
+
+    pub inline fn reply(self: ScopedRuntime, req: *Message, msg: anytype) !void {
+        try self.runtime.reply(self.alloc, req, msg);
+    }
+
+    pub inline fn reply_err(self: ScopedRuntime, req: *Message, resp: HandlerError) !void {
+        try self.runtime.reply_err(self.alloc, req, resp);
+    }
+
+    pub inline fn reply_ok(self: ScopedRuntime, req: *Message) !void {
+        try self.runtime.reply_ok(self.alloc, req);
     }
 };
 

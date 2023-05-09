@@ -2,6 +2,7 @@ const maelstrom = @import("maelstrom");
 const std = @import("std");
 
 const Runtime = maelstrom.Runtime;
+const ScopedRuntime = maelstrom.ScopedRuntime;
 const Message = maelstrom.Message;
 const Error = maelstrom.Error;
 
@@ -13,6 +14,6 @@ pub fn main() !void {
     try runtime.run();
 }
 
-fn echo(self: *Runtime, req: *Message) Error!void {
+fn echo(self: ScopedRuntime, req: *Message) Error!void {
     try self.reply_ok(req);
 }

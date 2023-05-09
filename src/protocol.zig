@@ -17,6 +17,7 @@ pub const MessageBody = struct {
 
     raw: std.json.Value,
 
+    pub usingnamespace FormatAsJson(@This());
     pub usingnamespace MessageBodyMethods(@This());
 };
 
@@ -112,6 +113,15 @@ fn MessageMethods(comptime Self: type) type {
 
 fn MessageBodyMethods(comptime Self: type) type {
     return struct {
+        pub fn init() MessageBody {
+            return MessageBody{
+                .typ = "",
+                .msg_id = 0,
+                .in_reply_to = 0,
+                .raw = .Null,
+            };
+        }
+
         pub fn from_json(self: *Self, src0: ?std.json.Value) !*MessageBody {
             if (src0 == null) return self;
             const src = src0.?;
@@ -122,15 +132,6 @@ fn MessageBodyMethods(comptime Self: type) type {
             self.raw = src;
 
             return self;
-        }
-
-        pub fn init() MessageBody {
-            return MessageBody{
-                .typ = "",
-                .msg_id = 0,
-                .in_reply_to = 0,
-                .raw = .Null,
-            };
         }
 
         pub fn to_json_value(self: Self, alloc: std.mem.Allocator) !std.json.Value {
