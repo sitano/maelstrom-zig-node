@@ -114,12 +114,13 @@ pub const Runtime = struct {
     //    runtime.send("n1", msg);
     //    runtime.send("n1", .{req.body, msg}) - merges objects.
     pub fn send(self: *Runtime, to: []const u8, msg: anytype) !void {
+        // TODO: shall allocate to the request arenas.
         var arena = std.heap.ArenaAllocator.init(self.alloc);
         defer arena.deinit();
 
         var allocator = arena.allocator();
         
-        const obj = try proto.to_json_value(allocator, msg);
+        const body = try proto.to_json_value(allocator, msg);
 
         var packet = proto.Message{
             .src = self.node_id,
@@ -127,27 +128,36 @@ pub const Runtime = struct {
             .body = proto.MessageBody.init(),
         };
 
-        packet.body.raw = obj;
+        packet.body.raw = body;
 
-        self.send_raw(try std.json.stringifyAlloc(allocator, packet, .{}));
+        var obj = try proto.to_json_value(allocator, packet);
+        const str = try std.json.stringifyAlloc(allocator, obj, .{});
+
+        self.send_raw(str);
+
+        if (self.node_id.len == 0) {
+            std.log.warn("Responding to {s} with {s} without having src address. Missed <init> message?", .{to, str});
+        }
     }
 
     pub fn send_back(self: *Runtime, req: *Message, msg: anytype) !void {
+        // TODO: shall allocate to the request arenas.
         try self.send(req.src, msg);
     }
 
     pub fn reply(self: *Runtime, req: *Message, msg: anytype) !void {
+        // TODO: shall allocate to the request arenas.
         var arena = std.heap.ArenaAllocator.init(self.alloc);
         defer arena.deinit();
 
         var allocator = arena.allocator();
-        
+
         var obj = try proto.to_json_value(allocator, msg);
         if (!obj.Object.contains("type")) {
             try obj.Object.put("type", std.json.Value{ .String = try std.fmt.allocPrint(allocator, "{s}_ok", .{req.body.typ}), });
         }
 
-        try self.send_back(req, msg);
+        try self.send(req.src, msg);
     }
 
     pub fn reply_err(self: *Runtime, req: *Message, resp: HandlerError) !void {
@@ -178,13 +188,15 @@ pub const Runtime = struct {
 
     pub fn run(self: *Runtime) !void {
         try self.pool.start(worker, .{self});
-        defer self.deinit();
 
         std.log.info("node started.", .{});
 
         self.listen(std.io.getStdIn().reader()) catch |e| {
             std.log.err("listen loop error: {}", .{e});
         };
+
+        // finish workers before printing finish.
+        self.deinit();
 
         std.log.info("node finished.", .{});
     }

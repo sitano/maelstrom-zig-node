@@ -102,9 +102,9 @@ fn MessageMethods(comptime Self: type) type {
 
         pub fn to_json_value(self: Self, alloc: std.mem.Allocator) !std.json.Value {
             var v = std.json.Value{ .Object = std.json.ObjectMap.init(alloc) };
-            if (self.src.len > 0) try v.Object.put("src", std.json.Value{ .String = self.src });
-            if (self.dest.len > 0) try v.Object.put("dest", std.json.Value{ .String = self.dest });
-            try v.Object.put("body", try self.to_json_value(alloc));
+            try v.Object.put("src", std.json.Value{ .String = self.src });
+            try v.Object.put("dest", std.json.Value{ .String = self.dest });
+            try v.Object.put("body", try self.body.to_json_value(alloc));
             return v;
         }
     };
