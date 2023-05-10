@@ -198,7 +198,7 @@ pub fn merge_json(dst: *std.json.Value, src: std.json.Value) !void {
 }
 
 /// all allocated memory belongs to the caller.
-/// double serialization is not efficient, but we want to be simple right now.
+/// FIXME: double serialization is not efficient, but we want to be simple right now.
 /// until the std lib api will be able to handle it.
 /// support override with to_json_value(Allocator).
 pub fn to_json_value(alloc: std.mem.Allocator, value: anytype) !std.json.Value {
@@ -255,6 +255,15 @@ pub fn merge_to_json(alloc: std.mem.Allocator, args: anytype) !std.json.Value {
     }
 
     return obj;
+}
+
+/// maps object src json representation into the target Object.
+/// FIXME: non efficient, but works.
+pub fn json_map_obj(comptime T: type, alloc: std.mem.Allocator, src: anytype) !T {
+    const srcObj = try to_json_value(alloc, src);
+    const srcStr = try std.json.stringifyAlloc(alloc, srcObj, .{});
+    var stream = std.json.TokenStream.init(srcStr);
+    return try std.json.parse(T, &stream, .{ .allocator = alloc, .ignore_unknown_fields = true, });
 }
 
 test "merge_to_json works" {

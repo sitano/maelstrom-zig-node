@@ -155,8 +155,15 @@ pub const Runtime = struct {
         try self.reply(alloc, req, obj);
     }
 
+    pub fn reply_custom_err(self: *Runtime, alloc: std.mem.Allocator, req: *Message, code: i64, text: []const u8) !void {
+        var obj = errors.to_message(HandlerError.Other);
+        obj.code = code;
+        obj.text = text;
+        try self.reply(alloc, req, obj);
+    }
+
     pub fn reply_ok(self: *Runtime, alloc: std.mem.Allocator, req: *Message) !void {
-        try self.reply(alloc, req, req);
+        try self.reply(alloc, req, .{});
     }
 
     // in: std.io.Reader.{}
@@ -213,12 +220,31 @@ pub const Runtime = struct {
 
         if (proto.parse_message(node.data.arena.allocator(), node.data.req)) |req| {
             var scoped = ScopedRuntime.init(self, node, id);
+            const is_init = std.mem.eql(u8, req.body.typ, "init");
+
+            if (is_init) {
+                process_init_message(&scoped, req) catch |err| {
+                    std.log.err("[{d}] processing init message error {s}: {}", .{ id, node.data.req, err });
+                    process_respond_err(scoped, req, HandlerError.MalformedRequest);
+                    return;
+                };
+            }
+
             if (self.handlers.get(req.body.typ)) |f| {
                 f(scoped, req) catch |err| {
                     process_respond_err(scoped, req, err);
                 };
-            } else {
+            } else if (!is_init) {
                 process_respond_err(scoped, req, HandlerError.NotSupported);
+                return;
+            }
+
+            if (is_init) {
+                scoped.reply_ok(req) catch |err| {
+                    std.log.err("[{d}] responding init message error {s}: {}", .{ id, node.data.req, err });
+                    process_respond_err(scoped, req, HandlerError.Crash);
+                    return;
+                };
             }
         } else |err| {
             std.log.err("[{d}] incoming message parsing error {s}: {}", .{ id, node.data.req, err });
@@ -229,6 +255,25 @@ pub const Runtime = struct {
         self.reply_err(req, resp) catch |err| {
             std.log.err("[{d}] responding with an error {} error {s}: {}", .{ self.worker_id, resp, req, err });
         };
+    }
+
+    fn process_init_message(self: *ScopedRuntime, req: *Message) !void {
+        const in = try proto.json_map_obj(proto.InitMessageBody, self.alloc, req.body);
+
+        const node_id = try self.runtime.alloc.dupe(u8, in.node_id);
+        var node_ids = try self.runtime.alloc.alloc([]const u8, in.node_ids.len);
+        var i: usize = 0; while (i < node_ids.len) { node_ids[i] = try self.runtime.alloc.dupe(u8, in.node_ids[i]); i+=1; }
+
+        self.runtime.m.lock();
+        defer self.runtime.m.unlock();
+
+        self.runtime.node_id = node_id;
+        self.runtime.nodes = node_ids;
+
+        self.node_id = node_id;
+        self.nodes = node_ids;
+
+        std.log.info("new cluster state: node_id = {s}, nodes = {s}", .{ node_id, node_ids } );
     }
 };
 
@@ -278,6 +323,10 @@ pub const ScopedRuntime = struct {
 
     pub inline fn reply_err(self: ScopedRuntime, req: *Message, resp: HandlerError) !void {
         try self.runtime.reply_err(self.alloc, req, resp);
+    }
+
+    pub fn reply_custom_err(self: *Runtime, req: *Message, code: i64, text: []const u8) !void {
+        try self.runtime.reply_custom_err(req, code, text);
     }
 
     pub inline fn reply_ok(self: ScopedRuntime, req: *Message) !void {
