@@ -222,8 +222,23 @@ pub fn to_json_value(alloc: std.mem.Allocator, value: anytype) !std.json.Value {
     var parser = std.json.Parser.init(alloc, false);
     defer parser.deinit();
 
-    const tree = try parser.parse(str);
-    return tree.root;
+    var obj = try parser.parse(str);
+
+    // FIXME: I am sorry for this hack. But std.json.Parser creates temporary arena allocator
+    //        that becomes dead after comes out of scope of parser.Parse() scope. So any other
+    //        calls to the objects that require allocation in tree.alocc are causing segfaults.
+    //        Also, thanks std.json.Parser.transition is private and we can't workaround that.
+    //        Without that we are having:
+    //            /usr/lib/zig/std/heap/arena_allocator.zig:67:42: 0x2a0c5f in allocImpl (echo)
+    //                    const cur_buf = cur_node.data[@sizeOf(BufNode)..];
+    //                                                 ^
+    //            /usr/lib/zig/std/mem/Allocator.zig:154:34: 0x291014 in allocAdvancedWithRetAddr__anon_8869 (echo)
+    //                return self.vtable.alloc(self.ptr, len, ptr_align, len_align, ret_addr);
+    //        At the moment, this is very dirty hack, but works while alloc is an whole scope
+    //        arena.
+    var t = obj.root; t.Object.allocator = alloc;
+
+    return t;
 }
 
 /// merges a set of objects into a json Value.
@@ -264,6 +279,18 @@ pub fn json_map_obj(comptime T: type, alloc: std.mem.Allocator, src: anytype) !T
     const srcStr = try std.json.stringifyAlloc(alloc, srcObj, .{});
     var stream = std.json.TokenStream.init(srcStr);
     return try std.json.parse(T, &stream, .{ .allocator = alloc, .ignore_unknown_fields = true, });
+}
+
+test "to_json(.{})" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var obj = try to_json_value(arena.allocator(), .{});
+    switch (obj) {
+        .Object => {},
+        else => try std.testing.expect(false),
+    }
+    var str = try std.json.stringifyAlloc(arena.allocator(), obj, .{});
+    try std.testing.expectEqualSlices(u8, "{}", str);
 }
 
 test "merge_to_json works" {
