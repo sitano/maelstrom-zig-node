@@ -5,13 +5,14 @@ pub const log = @import("log.zig");
 
 const runtime = @import("runtime.zig");
 pub const Runtime = runtime.Runtime;
+pub const ScopedRuntime = runtime.ScopedRuntime;
 
 pub const proto = @import("protocol.zig");
 pub const Message = proto.Message;
 pub const MessageBody = proto.MessageBody;
 
 pub const errors = @import("error.zig");
-pub const Error = errors.Error;
+pub const Error = errors.HandlerError;
 
 // we did like to use async io but it does not work at least until 0.12.0.
 // see protocol format() issues and mutex+async_print+darwin.

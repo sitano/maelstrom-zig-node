@@ -29,6 +29,7 @@ pub const InitMessageBody = struct {
 };
 
 pub const ErrorMessageBody = struct {
+    // .typ fields are handled by to_json_value.
     typ: []const u8,
     code: i64,
     text: []const u8,
@@ -131,6 +132,10 @@ fn MessageBodyMethods(comptime Self: type) type {
             self.in_reply_to = try_json_u64(src.Object.get("in_reply_to"));
             self.raw = src;
 
+            _ = self.raw.Object.swapRemove("type");
+            _ = self.raw.Object.swapRemove("msg_id");
+            _ = self.raw.Object.swapRemove("in_reply_to");
+
             return self;
         }
 
@@ -229,20 +234,51 @@ pub fn to_json_value(alloc: std.mem.Allocator, value: anytype) !std.json.Value {
     var obj = try parser.parse(str);
 
     // FIXME: I am sorry for this hack. But std.json.Parser creates temporary arena allocator
-    //        that becomes dead after comes out of scope of parser.Parse() scope. So any other
+    //        that becomes dead after it is coming out of scope of parser.Parse() scope. So any other
     //        calls to the objects that require allocation in tree.alocc are causing segfaults.
     //        Also, thanks std.json.Parser.transition is private and we can't workaround that.
+    //
     //        Without that we are having:
+    //
     //            /usr/lib/zig/std/heap/arena_allocator.zig:67:42: 0x2a0c5f in allocImpl (echo)
     //                    const cur_buf = cur_node.data[@sizeOf(BufNode)..];
     //                                                 ^
     //            /usr/lib/zig/std/mem/Allocator.zig:154:34: 0x291014 in allocAdvancedWithRetAddr__anon_8869 (echo)
     //                return self.vtable.alloc(self.ptr, len, ptr_align, len_align, ret_addr);
+    //
     //        At the moment, this is very dirty hack, but works while alloc is an whole scope
     //        arena.
+    //
+    //        This is fixed in main, see
+    //        https://github.com/ziglang/zig/commit/b42caff2a20eb34073f6a766f55d27288028165a.
+    //        
+    //        But we want to support at least 0.10.0.
     var t = obj.root; t.Object.allocator = alloc;
 
+    // Now we must transform all .typ fields into .type fields, as Zig don't have tags.
+    try rename_typ_field(&t);
+
     return t;
+}
+
+/// renames "typ" fields into "type" fields.
+/// FIXME: does storage modification invalidates running iterator? probably yes.
+fn rename_typ_field(o: *std.json.Value) !void {
+    switch (o.*) {
+        .Object => |inner| {
+            var it = inner.iterator();
+            while (it.next()) |entry| {
+                if (std.mem.eql(u8, entry.key_ptr.*, "typ")) {
+                    try o.Object.put("type", entry.value_ptr.*);
+                    _ = o.Object.swapRemove("typ");
+                    continue;
+                }
+
+                try rename_typ_field(entry.value_ptr);
+            }
+        },
+        else => {}
+    }
 }
 
 /// merges a set of objects into a json Value.
@@ -252,6 +288,11 @@ pub fn to_json_value(alloc: std.mem.Allocator, value: anytype) !std.json.Value {
 pub fn merge_to_json(alloc: std.mem.Allocator, args: anytype) !std.json.Value {
     const ArgsType = @TypeOf(args);
     const args_type_info = @typeInfo(ArgsType);
+
+    if (ArgsType == std.json.Value) {
+        return args;
+    }
+
     if (args_type_info != .Struct) {
         @compileError("expected tuple or struct argument, found " ++ @typeName(ArgsType));
     }

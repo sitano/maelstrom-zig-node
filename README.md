@@ -11,21 +11,20 @@ violated. With maelstrom you build nodes that form distributed system that can p
 
 # Features
 
-- TODO: zig + async + mt
-- TODO: simple API - single trait fn to implement
-- TODO: response types auto-deduction, extra data available via Value()
-- TODO: unknown message types handling
+- zig + async + mt
+- simple API - single trait fn to implement
+- response types auto-deduction, extra data available via Value()
+- unknown message types handling
 - TODO: a/sync RPC() support + timeout / context
 - TODO: lin/seq/lww kv storage
-- TODO: transparent error handling
-- TODO: thiserror + error parsing/ser causes
+
 # Examples
 
 ## Echo workload
 
 ```bash
 $ cargo build --examples
-$ maelstrom test -w echo --bin ./target/debug/examples/echo --node-count 1 --time-limit 10 --log-stderr
+$ zig build && ~/Projects/maelstrom/maelstrom test -w echo --bin ./zig-out/bin/echo --node-count 1 --time-limit 10 --log-stderr
 ````
 
 implementation:

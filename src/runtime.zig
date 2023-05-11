@@ -114,7 +114,7 @@ pub const Runtime = struct {
     //    runtime.send("n1", msg);
     //    runtime.send("n1", .{req.body, msg}) - merges objects.
     pub fn send(self: *Runtime, alloc: std.mem.Allocator, to: []const u8, msg: anytype) !void {
-        const body = try proto.to_json_value(alloc, msg);
+        const body = try proto.merge_to_json(alloc, msg);
 
         var packet = proto.Message{
             .src = self.node_id,
@@ -139,7 +139,9 @@ pub const Runtime = struct {
     }
 
     pub fn reply(self: *Runtime, alloc: std.mem.Allocator, req: *Message, msg: anytype) !void {
-        var obj = try proto.to_json_value(alloc, msg);
+        var obj = try proto.merge_to_json(alloc, msg);
+
+        try obj.Object.put("in_reply_to", std.json.Value{ .Integer = @intCast(i64, req.body.msg_id), });
 
         if (!obj.Object.contains("type")) {
             try obj.Object.put("type", std.json.Value{ .String = try std.fmt.allocPrint(alloc, "{s}_ok", .{req.body.typ}), });
@@ -164,7 +166,25 @@ pub const Runtime = struct {
     }
 
     pub fn reply_ok(self: *Runtime, alloc: std.mem.Allocator, req: *Message) !void {
-        try self.reply(alloc, req, .{});
+        var resp = std.json.Value{ .Object = std.json.ObjectMap.init(alloc), };
+        var typ = req.body.typ;
+
+        if (!std.mem.endsWith(u8, typ, "_ok")) {
+            typ = try std.fmt.allocPrint(alloc, "{s}_ok", .{typ});
+        }
+
+        try self.reply(alloc, req, resp);
+    }
+
+    pub fn send_back_ok(self: *Runtime, alloc: std.mem.Allocator, req: *Message) !void {
+        var resp = std.json.Value{ .Object = std.json.ObjectMap.init(alloc), };
+        var typ = req.body.typ;
+
+        if (!std.mem.endsWith(u8, typ, "_ok")) {
+            typ = try std.fmt.allocPrint(alloc, "{s}_ok", .{typ});
+        }
+
+        try self.reply(alloc, req, .{ req.body, resp });
     }
 
     // in: std.io.Reader.{}
@@ -226,36 +246,24 @@ pub const Runtime = struct {
             if (is_init) {
                 process_init_message(&scoped, req) catch |err| {
                     std.log.err("[{d}] processing init message error {s}: {}", .{ id, node.data.req, err });
-                    process_respond_err(scoped, req, HandlerError.MalformedRequest);
+                    scoped.reply_err(req, HandlerError.MalformedRequest);
                     return;
                 };
             }
 
             if (self.handlers.get(req.body.typ)) |f| {
-                f(scoped, req) catch |err| {
-                    process_respond_err(scoped, req, err);
-                };
+                f(scoped, req) catch |err| scoped.reply_err(req, err);
             } else if (!is_init) {
-                process_respond_err(scoped, req, HandlerError.NotSupported);
+                scoped.reply_err(req, HandlerError.NotSupported);
                 return;
             }
 
             if (is_init) {
-                scoped.reply_ok(req) catch |err| {
-                    std.log.err("[{d}] responding init message error {s}: {}", .{ id, node.data.req, err });
-                    process_respond_err(scoped, req, HandlerError.Crash);
-                    return;
-                };
+                scoped.reply_ok(req);
             }
         } else |err| {
             std.log.err("[{d}] incoming message parsing error {s}: {}", .{ id, node.data.req, err });
         }
-    }
-
-    fn process_respond_err(self: ScopedRuntime, req: *Message, resp: HandlerError) void {
-        self.reply_err(req, resp) catch |err| {
-            std.log.err("[{d}] responding with an error {} error {s}: {}", .{ self.worker_id, resp, req, err });
-        };
     }
 
     fn process_init_message(self: *ScopedRuntime, req: *Message) !void {
@@ -310,28 +318,51 @@ pub const ScopedRuntime = struct {
     //
     //    runtime.send("n1", msg);
     //    runtime.send("n1", .{req.body, msg}) - merges objects.
-    pub inline fn send(self: ScopedRuntime, to: []const u8, msg: anytype) !void {
-        try self.runtime.send(self.alloc, to, msg);
+    pub inline fn send(self: ScopedRuntime, to: []const u8, msg: anytype) void {
+        self.runtime.send(self.alloc, to, msg) catch |err| {
+            std.log.err("[{d}] seding {s} to {s} error: {}", .{ self.worker_id, msg, to, err });
+            self.runtime.send(self, to, errors.to_message(HandlerError.Crash)) catch |err2| {
+                std.debug.panic("[{d}] sending error Crash error: {}", .{ self.worker_id, err2 });
+            };
+        };
     }
 
-    pub inline fn send_back(self: ScopedRuntime, req: *Message, msg: anytype) !void {
-        try self.runtime.send_back(self.alloc, req, msg);
+    pub inline fn send_back(self: ScopedRuntime, req: *Message, msg: anytype) void {
+        self.runtime.send_back(self.alloc, req, msg) catch |err| {
+            std.log.err("[{d}] sending back {s} on {s} error: {}", .{ self.worker_id, msg, req, err });
+            self.runtime.reply_err(self, req, HandlerError.Crash);
+        };
     }
 
-    pub inline fn reply(self: ScopedRuntime, req: *Message, msg: anytype) !void {
-        try self.runtime.reply(self.alloc, req, msg);
+    pub inline fn reply(self: ScopedRuntime, req: *Message, msg: anytype) void {
+        self.runtime.reply(self.alloc, req, msg) catch |err| {
+            std.log.err("[{d}] responding with {s} to {s} error: {}", .{ self.worker_id, msg, req, err });
+            self.reply_err(req, HandlerError.Crash);
+        };
     }
 
-    pub inline fn reply_err(self: ScopedRuntime, req: *Message, resp: HandlerError) !void {
-        try self.runtime.reply_err(self.alloc, req, resp);
+    pub inline fn reply_err(self: ScopedRuntime, req: *Message, resp: HandlerError) void {
+        self.runtime.reply_err(self.alloc, req, resp) catch |err| {
+            std.debug.panic("[{d}] responding with error {} error {s}: {}", .{ self.worker_id, resp, req, err });
+        };
     }
 
-    pub fn reply_custom_err(self: *Runtime, req: *Message, code: i64, text: []const u8) !void {
-        try self.runtime.reply_custom_err(req, code, text);
+    pub fn reply_custom_err(self: *Runtime, req: *Message, code: i64, text: []const u8) void {
+        self.runtime.reply_custom_err(req, code, text) catch |err| {
+            std.debug.panic("[{d}] responding with custom error {}:{} error {s}: {}", .{ self.worker_id, code, text, req, err });
+        };
     }
 
-    pub inline fn reply_ok(self: ScopedRuntime, req: *Message) !void {
-        try self.runtime.reply_ok(self.alloc, req);
+    pub inline fn reply_ok(self: ScopedRuntime, req: *Message) void {
+        self.runtime.reply_ok(self.alloc, req) catch |err| {
+            std.debug.panic("[{d}] responding with ok error {s}: {}", .{ self.worker_id, req, err });
+        };
+    }
+
+    pub inline fn send_back_ok(self: ScopedRuntime, req: *Message) void {
+        self.runtime.send_back_ok(self.alloc, req) catch |err| {
+            std.debug.panic("[{d}] responding with ok error {s}: {}", .{ self.worker_id, req, err });
+        };
     }
 };
 
