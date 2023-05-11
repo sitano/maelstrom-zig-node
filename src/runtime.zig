@@ -140,11 +140,12 @@ pub const Runtime = struct {
 
     pub fn reply(self: *Runtime, alloc: std.mem.Allocator, req: *Message, msg: anytype) !void {
         var obj = try proto.to_json_value(alloc, msg);
+
         if (!obj.Object.contains("type")) {
             try obj.Object.put("type", std.json.Value{ .String = try std.fmt.allocPrint(alloc, "{s}_ok", .{req.body.typ}), });
         }
 
-        try self.send(alloc, req.src, msg);
+        try self.send(alloc, req.src, obj);
     }
 
     pub fn reply_err(self: *Runtime, alloc: std.mem.Allocator, req: *Message, resp: HandlerError) !void {

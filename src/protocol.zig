@@ -209,6 +209,10 @@ pub fn to_json_value(alloc: std.mem.Allocator, value: anytype) !std.json.Value {
         return to_json_value(alloc, value.*);
     }
 
+    if (T == std.json.Value) {
+        return value;
+    }
+
     if (args_type_info != .Struct) {
         @compileError("expected tuple or struct argument, found " ++ @typeName(T));
     }
@@ -284,13 +288,23 @@ pub fn json_map_obj(comptime T: type, alloc: std.mem.Allocator, src: anytype) !T
 test "to_json(.{})" {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    var obj = try to_json_value(arena.allocator(), .{});
-    switch (obj) {
-        .Object => {},
-        else => try std.testing.expect(false),
+
+    {
+        var obj = try to_json_value(arena.allocator(), .{});
+        switch (obj) {
+            .Object => {},
+            else => try std.testing.expect(false),
+        }
+        
+        var str = try std.json.stringifyAlloc(arena.allocator(), obj, .{});
+        try std.testing.expectEqualSlices(u8, "{}", str);
     }
-    var str = try std.json.stringifyAlloc(arena.allocator(), obj, .{});
-    try std.testing.expectEqualSlices(u8, "{}", str);
+
+    {
+        const obj = std.json.Value{ .Object = std.json.ObjectMap.init(arena.allocator()), };
+        var res = try to_json_value(arena.allocator(), obj);
+        try std.testing.expectEqual(obj, res);    
+    }
 }
 
 test "merge_to_json works" {
