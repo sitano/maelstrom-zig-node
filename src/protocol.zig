@@ -297,6 +297,10 @@ pub fn merge_to_json(alloc: std.mem.Allocator, args: anytype) !std.json.Value {
         @compileError("expected tuple or struct argument, found " ++ @typeName(ArgsType));
     }
 
+    if (!args_type_info.Struct.is_tuple) {
+        return to_json_value(alloc, args);
+    }
+
     const fields_info = args_type_info.Struct.fields;
     const len = comptime fields_info.len;
 

@@ -184,6 +184,8 @@ pub const Runtime = struct {
             typ = try std.fmt.allocPrint(alloc, "{s}_ok", .{typ});
         }
 
+        try resp.Object.put("type", std.json.Value{ .String = typ, });
+
         try self.reply(alloc, req, .{ req.body, resp });
     }
 
