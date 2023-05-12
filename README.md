@@ -23,8 +23,7 @@ violated. With maelstrom you build nodes that form distributed system that can p
 ## Echo workload
 
 ```bash
-$ cargo build --examples
-$ zig build && ~/Projects/maelstrom/maelstrom test -w echo --bin ./zig-out/bin/echo --node-count 1 --time-limit 10 --log-stderr
+zig build && ~/Projects/maelstrom/maelstrom test -w echo --bin ./zig-out/bin/echo --node-count 1 --time-limit 10 --log-stderr
 ````
 
 implementation:

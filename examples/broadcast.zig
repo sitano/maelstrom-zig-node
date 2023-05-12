@@ -1,4 +1,4 @@
-// zig build && ~/maelstrom/maelstrom test -w echo --bin ./zig-out/bin/echo --node-count 1 --time-limit 10 --log-stderr
+// zig build && ~/maelstrom/maelstrom test -w broadcast --bin ./zig-out/bin/broadcast --node-count 2 --time-limit 20 --rate 10 --log-stderr
 
 const m = @import("maelstrom");
 const std = @import("std");
