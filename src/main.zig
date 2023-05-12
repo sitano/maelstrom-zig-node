@@ -1,3 +1,5 @@
+// implementation is based on zig 0.10.1.
+
 const builtin = @import("builtin");
 const std = @import("std");
 

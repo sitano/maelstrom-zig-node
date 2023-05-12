@@ -11,8 +11,8 @@ violated. With maelstrom you build nodes that form distributed system that can p
 
 # Features
 
-- zig + async + mt
-- simple API - single trait fn to implement
+- zig 0.10.1 + mt
+- simple API
 - response types auto-deduction, extra data available via Value()
 - unknown message types handling
 - TODO: a/sync RPC() support + timeout / context
