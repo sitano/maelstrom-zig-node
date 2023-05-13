@@ -130,7 +130,7 @@ pub const Runtime = struct {
         self.send_raw(str);
 
         if (self.node_id.len == 0) {
-            std.log.warn("Responding to {s} with {s} without having src address. Missed <init> message?", .{to, str});
+            std.log.warn("Responding to {s} with {s} without having src address. Missed <init> message?", .{ to, str });
         }
     }
 
@@ -141,10 +141,14 @@ pub const Runtime = struct {
     pub fn reply(self: *Runtime, alloc: std.mem.Allocator, req: *Message, msg: anytype) !void {
         var obj = try proto.merge_to_json(alloc, msg);
 
-        try obj.Object.put("in_reply_to", std.json.Value{ .Integer = @intCast(i64, req.body.msg_id), });
+        try obj.Object.put("in_reply_to", std.json.Value{
+            .Integer = @intCast(i64, req.body.msg_id),
+        });
 
         if (!obj.Object.contains("type")) {
-            try obj.Object.put("type", std.json.Value{ .String = try std.fmt.allocPrint(alloc, "{s}_ok", .{req.body.typ}), });
+            try obj.Object.put("type", std.json.Value{
+                .String = try std.fmt.allocPrint(alloc, "{s}_ok", .{req.body.typ}),
+            });
         }
 
         try self.send(alloc, req.src, obj);
@@ -166,7 +170,9 @@ pub const Runtime = struct {
     }
 
     pub fn reply_ok(self: *Runtime, alloc: std.mem.Allocator, req: *Message) !void {
-        var resp = std.json.Value{ .Object = std.json.ObjectMap.init(alloc), };
+        var resp = std.json.Value{
+            .Object = std.json.ObjectMap.init(alloc),
+        };
         var typ = req.body.typ;
 
         if (!std.mem.endsWith(u8, typ, "_ok")) {
@@ -177,14 +183,18 @@ pub const Runtime = struct {
     }
 
     pub fn send_back_ok(self: *Runtime, alloc: std.mem.Allocator, req: *Message) !void {
-        var resp = std.json.Value{ .Object = std.json.ObjectMap.init(alloc), };
+        var resp = std.json.Value{
+            .Object = std.json.ObjectMap.init(alloc),
+        };
         var typ = req.body.typ;
 
         if (!std.mem.endsWith(u8, typ, "_ok")) {
             typ = try std.fmt.allocPrint(alloc, "{s}_ok", .{typ});
         }
 
-        try resp.Object.put("type", std.json.Value{ .String = typ, });
+        try resp.Object.put("type", std.json.Value{
+            .String = typ,
+        });
 
         try self.reply(alloc, req, .{ req.body, resp });
     }
@@ -273,7 +283,11 @@ pub const Runtime = struct {
 
         const node_id = try self.runtime.alloc.dupe(u8, in.node_id);
         var node_ids = try self.runtime.alloc.alloc([]const u8, in.node_ids.len);
-        var i: usize = 0; while (i < node_ids.len) { node_ids[i] = try self.runtime.alloc.dupe(u8, in.node_ids[i]); i+=1; }
+        var i: usize = 0;
+        while (i < node_ids.len) {
+            node_ids[i] = try self.runtime.alloc.dupe(u8, in.node_ids[i]);
+            i += 1;
+        }
 
         self.runtime.m.lock();
         defer self.runtime.m.unlock();
@@ -284,7 +298,15 @@ pub const Runtime = struct {
         self.node_id = node_id;
         self.nodes = node_ids;
 
-        std.log.info("new cluster state: node_id = {s}, nodes = {s}", .{ node_id, node_ids } );
+        std.log.info("new cluster state: node_id = {s}, nodes = {s}", .{ node_id, node_ids });
+    }
+
+    pub fn neighbours(self: *Runtime) NeighbourIterator {
+        return NeighbourIterator{
+            .node_id = self.node_id,
+            .nodes = self.nodes,
+            .len = self.nodes.len,
+        };
     }
 };
 
@@ -322,8 +344,8 @@ pub const ScopedRuntime = struct {
     //    runtime.send("n1", .{req.body, msg}) - merges objects.
     pub inline fn send(self: ScopedRuntime, to: []const u8, msg: anytype) void {
         self.runtime.send(self.alloc, to, msg) catch |err| {
-            std.log.err("[{d}] seding {s} to {s} error: {}", .{ self.worker_id, msg, to, err });
-            self.runtime.send(self, to, errors.to_message(HandlerError.Crash)) catch |err2| {
+            std.log.err("[{d}] sending {} to {s} error: {}", .{ self.worker_id, msg, to, err });
+            self.runtime.send(self.alloc, to, errors.to_message(HandlerError.Crash)) catch |err2| {
                 std.debug.panic("[{d}] sending error Crash error: {}", .{ self.worker_id, err2 });
             };
         };
@@ -331,14 +353,14 @@ pub const ScopedRuntime = struct {
 
     pub inline fn send_back(self: ScopedRuntime, req: *Message, msg: anytype) void {
         self.runtime.send_back(self.alloc, req, msg) catch |err| {
-            std.log.err("[{d}] sending back {s} on {s} error: {}", .{ self.worker_id, msg, req, err });
-            self.runtime.reply_err(self, req, HandlerError.Crash);
+            std.log.err("[{d}] sending back {} on {s} error: {}", .{ self.worker_id, msg, req, err });
+            self.runtime.reply_err(self.alloc, req, HandlerError.Crash);
         };
     }
 
     pub inline fn reply(self: ScopedRuntime, req: *Message, msg: anytype) void {
         self.runtime.reply(self.alloc, req, msg) catch |err| {
-            std.log.err("[{d}] responding with {s} to {s} error: {}", .{ self.worker_id, msg, req, err });
+            std.log.err("[{d}] responding with {} to {s} error: {}", .{ self.worker_id, msg, req, err });
             self.reply_err(req, HandlerError.Crash);
         };
     }
@@ -351,7 +373,7 @@ pub const ScopedRuntime = struct {
 
     pub fn reply_custom_err(self: *Runtime, req: *Message, code: i64, text: []const u8) void {
         self.runtime.reply_custom_err(req, code, text) catch |err| {
-            std.debug.panic("[{d}] responding with custom error {}:{} error {s}: {}", .{ self.worker_id, code, text, req, err });
+            std.debug.panic("[{d}] responding with custom error {d}:{s} error {s}: {}", .{ self.worker_id, code, text, req, err });
         };
     }
 
@@ -365,6 +387,40 @@ pub const ScopedRuntime = struct {
         self.runtime.send_back_ok(self.alloc, req) catch |err| {
             std.debug.panic("[{d}] responding with ok error {s}: {}", .{ self.worker_id, req, err });
         };
+    }
+
+    pub fn neighbours(self: ScopedRuntime) NeighbourIterator {
+        return NeighbourIterator{
+            .node_id = self.node_id,
+            .nodes = self.nodes,
+            .len = self.nodes.len,
+        };
+    }
+
+    pub fn is_cluster_node(_: ScopedRuntime, src: []const u8) bool {
+        return src.len > 0 and src[0] == 'n';
+    }
+};
+
+pub const NeighbourIterator = struct {
+    node_id: []const u8,
+    nodes: [][]const u8,
+    len: usize,
+    index: usize = 0,
+
+    pub fn next(it: *NeighbourIterator) ?[]const u8 {
+        if (it.index >= it.len) return null;
+        if (std.mem.eql(u8, it.nodes[it.index], it.node_id)) {
+            it.index += 1;
+            if (it.index >= it.len) return null;
+        }
+        it.index += 1;
+        return it.nodes[it.index - 1];
+    }
+
+    /// Reset the iterator to the initial index
+    pub fn reset(it: *NeighbourIterator) void {
+        it.index = 0;
     }
 };
 

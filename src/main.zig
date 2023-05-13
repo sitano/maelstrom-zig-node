@@ -26,3 +26,7 @@ pub const Error = errors.HandlerError;
 //
 // async io also requires enabling stage1 compiler (-fstage1).
 const _ = if (std.io.is_async) @panic("io is async, but is broken, thus unsupported at least until 0.12.0. sorry.") else void;
+
+pub fn init() !*Runtime {
+    return Runtime.init();
+}

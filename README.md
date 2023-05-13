@@ -4,12 +4,12 @@ Zig node framework for building distributed systems for learning for
 https://github.com/jepsen-io/maelstrom and solving https://fly.io/dist-sys/
 challenges.
 
-# What is Maelstrom?
+## What is Maelstrom?
 
 Maelstrom is a platform for learning distributed systems. It is build around Jepsen and Elle to ensure no properties are
 violated. With maelstrom you build nodes that form distributed system that can process different workloads.
 
-# Features
+## Features
 
 - zig 0.10.1 + mt
 - simple API
@@ -18,9 +18,9 @@ violated. With maelstrom you build nodes that form distributed system that can p
 - TODO: a/sync RPC() support + timeout / context
 - TODO: lin/seq/lww kv storage
 
-# Examples
+## Examples
 
-## Echo workload
+### Echo workload
 
 ```bash
 zig build && ~/Projects/maelstrom/maelstrom test -w echo --bin ./zig-out/bin/echo --node-count 1 --time-limit 10 --log-stderr
@@ -28,112 +28,176 @@ zig build && ~/Projects/maelstrom/maelstrom test -w echo --bin ./zig-out/bin/ech
 
 implementation:
 
-...
+```zig
+const m = @import("maelstrom");
+const std = @import("std");
+
+pub const log = m.log.f;
+pub const log_level = .debug;
+
+pub fn main() !void {
+    var runtime = try m.Runtime.init();
+    try runtime.handle("echo", echo);
+    try runtime.run();
+}
+
+fn echo(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
+    self.send_back_ok(req);
+}
+```
 
 spec:
 
 receiving
 
-    {
-      "src": "c1",
-      "dest": "n1",
-      "body": {
-        "type": "echo",
-        "msg_id": 1,
-        "echo": "Please echo 35"
-      }
-    }
+```json
+{
+  "src": "c1",
+  "dest": "n1",
+  "body": {
+    "type": "echo",
+    "msg_id": 1,
+    "echo": "Please echo 35"
+  }
+}
+```
 
 send back the same msg with body.type == echo_ok.
 
-    {
-      "src": "n1",
-      "dest": "c1",
-      "body": {
-        "type": "echo_ok",
-        "msg_id": 1,
-        "in_reply_to": 1,
-        "echo": "Please echo 35"
-      }
+```json
+{
+  "src": "n1",
+  "dest": "c1",
+  "body": {
+    "type": "echo_ok",
+    "msg_id": 1,
+    "in_reply_to": 1,
+    "echo": "Please echo 35"
+  }
+}
+```
+
+### Broadcast workload
+
+```sh
+zig build && ~/maelstrom/maelstrom test -w broadcast --bin ./zig-out/bin/broadcast --node-count 2 --time-limit 20 --rate 10 --log-stderr
+```
+
+implementation:
+
+```zig
+var storage: *Storage = undefined;
+
+pub fn main() !void {
+    var runtime = try m.init();
+    storage = try Storage.init(runtime.alloc);
+    try runtime.handle("read", read);
+    try runtime.handle("broadcast", broadcast);
+    try runtime.handle("topology", topology);
+    try runtime.run();
+}
+
+fn read(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
+    self.reply(req, ReadOk{
+        .messages = storage.snapshot(self.alloc) catch return m.Error.Abort,
+    });
+}
+
+fn broadcast(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
+    const in = m.proto.json_map_obj(Broadcast, self.alloc, req.body) catch return m.Error.MalformedRequest;
+
+    if (storage.add(in.message) catch return m.Error.Abort) {
+        var ns = self.neighbours();
+        while (ns.next()) |node| {
+            self.send(node, .{
+                .typ = "broadcast",
+                .message = in.message,
+            });
+        }
     }
 
-## Broadcast workload
+    if (!self.is_cluster_node(req.src)) {
+        self.reply_ok(req);
+    }
+}
 
-```bash
-$ cargo build --examples
-$ RUST_LOG=debug maelstrom test -w broadcast --bin ./target/debug/examples/broadcast --node-count 2 --time-limit 20 --rate 10 --log-stderr
-````
+fn topology(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
+    // FIXME: oops sorry, compiler bug:
+    //     panic: Zig compiler bug: attempted to destroy declaration with an attached error
+    // const in = try m.proto.json_map_obj(Topology, self.alloc, req.body);
+    const data = req.body.raw.Object.get("topology");
+    if (data == null) return m.Error.MalformedRequest;
+    std.log.info("got new topology: {s}", .{std.json.stringifyAlloc(self.alloc, data, .{}) catch return m.Error.Abort});
+    self.reply_ok(req);
+}
+```
 
-implementation:
+### lin-kv workload
 
-...
-
-## lin-kv workload
-
-```bash
-$ cargo build --examples
-$ RUST_LOG=debug ~/Projects/maelstrom/maelstrom test -w lin-kv --bin ./target/debug/examples/lin_kv --node-count 4 --concurrency 2n --time-limit 10 --rate 100 --log-stderr
-````
-
-implementation:
-
-...
-
-## g-set workload
-
-```bash
-$ cargo build --examples
-$ RUST_LOG=debug ~/Projects/maelstrom/maelstrom test -w g-set --bin ./target/debug/examples/g_set --node-count 2 --concurrency 2n --time-limit 20 --rate 10 --log-stderr
+```sh
+RUST_LOG=debug ~/maelstrom/maelstrom test -w lin-kv --bin ./target/debug/examples/lin_kv --node-count 4 --concurrency 2n --time-limit 10 --rate 100 --log-stderr
 ```
 
 implementation:
 
-```
+```zig
 ...
 ```
 
-# API
+### g-set workload
 
-## Key-Value storage
-
+```sh
+RUST_LOG=debug ~/Projects/maelstrom/maelstrom test -w g-set --bin ./target/debug/examples/g_set --node-count 2 --concurrency 2n --time-limit 20 --rate 10 --log-stderr
 ```
+
+implementation:
+
+```zig
 ...
 ```
 
-## RPC
+## API
 
-```
+### Key-Value storage
+
+```zig
 ...
 ```
 
-## Requests
+### RPC
 
-```
+```zig
 ...
 ```
 
-## Responses
+### Requests
 
-```
+```zig
 ...
 ```
 
-# Why
+### Responses
+
+```zig
+...
+```
+
+## Why
 
 Now its a good time to learn Zig. Zig is beautiful C-like language.
 That Will be not perfect but ok. Thanks TigerBeetle for the inspiration.
 
 Thanks Aphyr and guys a lot.
 
-# Where
+## Where
 
 [GitHub](https://github.com/sitano/maelstrom-zig-node)
 
-# Links
+## Links
 
-- https://zig.news/xq/zig-build-explained-part-3-1ima
-- https://zig.news/mattnite/import-and-packages-23mb 
-- https://ziglearn.org/chapter-1/
-- https://ziglang.org/learn/
-- https://ziglang.org/learn/samples/
-- https://ziglang.org/documentation/master/
+- <https://zig.news/xq/zig-build-explained-part-3-1ima>
+- <https://zig.news/mattnite/import-and-packages-23mb>
+- <https://ziglearn.org/chapter-1/>
+- <https://ziglang.org/learn/>
+- <https://ziglang.org/learn/samples/>
+- <https://ziglang.org/documentation/master/>
