@@ -1,8 +1,9 @@
 const builtin = @import("builtin");
+const errors = @import("error.zig");
 const pool = @import("pool.zig");
 const proto = @import("protocol.zig");
-const errors = @import("error.zig");
 const root = @import("root");
+const rpc = @import("rpc.zig");
 const std = @import("std");
 
 const Message = proto.Message;
@@ -31,6 +32,7 @@ pub const Runtime = struct {
     // log: TODO: @TypeOf(Scoped)
 
     handlers: HandlerMap,
+    rpc: rpc.Runtime,
 
     // init state
     m: MutexType,
@@ -60,6 +62,7 @@ pub const Runtime = struct {
         runtime.out = std.io.getStdOut();
         runtime.pool = try pool.Pool.init(runtime.alloc, @max(2, @min(4, try std.Thread.getCpuCount())));
         runtime.handlers = HandlerMap.init(runtime.alloc);
+        runtime.rpc = try rpc.Runtime.init(runtime.alloc);
         runtime.m = MutexType{};
         runtime.node_id = "";
         runtime.nodes = &EmptyStringArray;
@@ -70,6 +73,7 @@ pub const Runtime = struct {
     pub fn deinit(self: *Runtime) void {
         self.pool.deinit();
         self.handlers.deinit();
+        self.rpc.deinit();
     }
 
     /// handle(type, f) registers a handler for specific message type.
