@@ -3,7 +3,7 @@ const errors = @import("error.zig");
 const pool = @import("pool.zig");
 const proto = @import("protocol.zig");
 const root = @import("root");
-const rpc = @import("rpc.zig");
+const rpcpkg = @import("rpc.zig");
 const std = @import("std");
 
 const Message = proto.Message;
@@ -21,6 +21,9 @@ pub const Handler = fn (ScopedRuntime, *Message) HandlerError!void;
 pub const HandlerPtr = *const Handler;
 pub const HandlerMap = std.StringHashMap(HandlerPtr);
 
+pub const RPCRequest = rpcpkg.Request;
+const RPCRuntime = rpcpkg.Runtime;
+
 pub const Runtime = struct {
     gpa: ?std.heap.GeneralPurposeAllocator(.{}),
     // thread-safe by itself
@@ -32,7 +35,7 @@ pub const Runtime = struct {
     // log: TODO: @TypeOf(Scoped)
 
     handlers: HandlerMap,
-    rpc: rpc.Runtime,
+    rpc: RPCRuntime,
 
     // init state
     m: MutexType,
@@ -62,7 +65,7 @@ pub const Runtime = struct {
         runtime.out = std.io.getStdOut();
         runtime.pool = try pool.Pool.init(runtime.alloc, @max(2, @min(4, try std.Thread.getCpuCount())));
         runtime.handlers = HandlerMap.init(runtime.alloc);
-        runtime.rpc = try rpc.Runtime.init(runtime.alloc);
+        runtime.rpc = try RPCRuntime.init(runtime.alloc);
         runtime.m = MutexType{};
         runtime.node_id = "";
         runtime.nodes = &EmptyStringArray;
@@ -201,6 +204,34 @@ pub const Runtime = struct {
         });
 
         try self.reply(alloc, req, .{ req.body, resp });
+    }
+
+    /// rpc() makes an RPC call to another node.
+    pub fn rpc(self: *Runtime, to: []const u8, msg: anytype) !*RPCRequest {
+        var req = try self.rpc.new_req();
+        var alloc = req.arena.allocator();
+        var obj = try proto.merge_to_json(alloc, msg);
+        try self.send(alloc, to, .{ proto.MessageBody{ .msg_id = req.msg_id, .raw = obj }, });
+        return req;
+    }
+
+    /// call() makes a sync RPC call to another node.
+    pub fn call(self: *Runtime, to: []const u8, msg: anytype) !*RPCRequest {
+        var req = try self.rpc(to, msg);
+        req.wait();
+        return req;
+    }
+
+    /// call_timed() makes a sync RPC call to another node.
+    pub fn call_timed(self: *Runtime, to: []const u8, msg: anytype, timeout_ns: u64) !*RPCRequest {
+        var req = try self.rpc(to, msg);
+        req.timed_wait(timeout_ns);
+        return req;
+    }
+
+    /// call_async() makes an async RPC call to another node.
+    pub fn call_async(self: *Runtime, to: []const u8, msg: anytype) !*RPCRequest {
+        return try self.rpc(to, msg);
     }
 
     // in: std.io.Reader.{}
