@@ -77,4 +77,5 @@ pub fn build(b: *std.build.Builder) void {
 
     build_example(b, target, "echo");
     build_example(b, target, "broadcast");
+    build_example(b, target, "broadcast_rpc_sync");
 }

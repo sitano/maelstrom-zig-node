@@ -35,7 +35,7 @@ pub const Runtime = struct {
     // log: TODO: @TypeOf(Scoped)
 
     handlers: HandlerMap,
-    rpc: RPCRuntime,
+    rpc_runtime: RPCRuntime,
 
     // init state
     m: MutexType,
@@ -65,7 +65,7 @@ pub const Runtime = struct {
         runtime.out = std.io.getStdOut();
         runtime.pool = try pool.Pool.init(runtime.alloc, @max(2, @min(4, try std.Thread.getCpuCount())));
         runtime.handlers = HandlerMap.init(runtime.alloc);
-        runtime.rpc = try RPCRuntime.init(runtime.alloc);
+        runtime.rpc_runtime = try RPCRuntime.init(runtime.alloc);
         runtime.m = MutexType{};
         runtime.node_id = "";
         runtime.nodes = &EmptyStringArray;
@@ -76,7 +76,7 @@ pub const Runtime = struct {
     pub fn deinit(self: *Runtime) void {
         self.pool.deinit();
         self.handlers.deinit();
-        self.rpc.deinit();
+        self.rpc_runtime.deinit();
     }
 
     /// handle(type, f) registers a handler for specific message type.
@@ -207,31 +207,26 @@ pub const Runtime = struct {
     }
 
     /// rpc() makes an RPC call to another node.
-    pub fn rpc(self: *Runtime, to: []const u8, msg: anytype) !*RPCRequest {
-        var req = try self.rpc.new_req();
+    /// if Request is async, the Runtime shall execute a message handler,
+    /// to process the request. Otherwise, it expects the waiters to be notified.
+    pub fn rpc(self: *Runtime, is_async: bool, to: []const u8, msg: anytype) !*RPCRequest {
+        var req = try self.rpc_runtime.new_req(is_async);
         var alloc = req.arena.allocator();
         var obj = try proto.merge_to_json(alloc, msg);
-        try self.send(alloc, to, .{ proto.MessageBody{ .msg_id = req.msg_id, .raw = obj }, });
+        try self.send(alloc, to, .{
+            proto.MessageBody{ .typ = "", .msg_id = req.msg_id, .in_reply_to = 0, .raw = obj },
+        });
         return req;
     }
 
-    /// call() makes a sync RPC call to another node.
+    /// call() makes a sync RPC call to another node. use .wait() or .timed_wait().
     pub fn call(self: *Runtime, to: []const u8, msg: anytype) !*RPCRequest {
-        var req = try self.rpc(to, msg);
-        req.wait();
-        return req;
-    }
-
-    /// call_timed() makes a sync RPC call to another node.
-    pub fn call_timed(self: *Runtime, to: []const u8, msg: anytype, timeout_ns: u64) !*RPCRequest {
-        var req = try self.rpc(to, msg);
-        req.timed_wait(timeout_ns);
-        return req;
+        return try self.rpc(false, to, msg);
     }
 
     /// call_async() makes an async RPC call to another node.
     pub fn call_async(self: *Runtime, to: []const u8, msg: anytype) !*RPCRequest {
-        return try self.rpc(to, msg);
+        return try self.rpc(true, to, msg);
     }
 
     // in: std.io.Reader.{}
@@ -289,6 +284,25 @@ pub const Runtime = struct {
         if (proto.parse_message(node.data.arena.allocator(), node.data.req)) |req| {
             var scoped = ScopedRuntime.init(self, node, id);
             const is_init = std.mem.eql(u8, req.body.typ, "init");
+            const rpc_request = self.rpc_runtime.poll_request(req.body.in_reply_to);
+
+            if (rpc_request) |item| {
+                // FIXME: any ideas how to move the whole tree to another arena?
+                //        we can't just pass the req with local lifetime (node.data.arena a') to the external lifetime b'.
+                if (proto.parse_message(item.arena.allocator(), node.data.req)) |resp| {
+                    item.set_completed(resp);
+                } else |err| {
+                    // we can't continue from here safely. probably we could, but this is experimental project.
+                    std.debug.panic("[{d}] rpc response parsing error {s}: {}", .{ id, node.data.req, err });
+                }
+
+                if (item.is_async) {
+                    defer item.arena.deinit();
+                } else {
+                    // for cleaning responsible the waiting thread.
+                    return;
+                }
+            }
 
             if (is_init) {
                 process_init_message(&scoped, req) catch |err| {
@@ -422,6 +436,26 @@ pub const ScopedRuntime = struct {
         self.runtime.send_back_ok(self.alloc, req) catch |err| {
             std.debug.panic("[{d}] responding with ok error {s}: {}", .{ self.worker_id, req, err });
         };
+    }
+
+    /// rpc() makes an RPC call to another node.
+    /// if Request is async, the Runtime shall execute a message handler,
+    /// to process the request. Otherwise, it expects the waiters to be notified.
+    pub fn rpc(self: ScopedRuntime, is_async: bool, to: []const u8, msg: anytype) *RPCRequest {
+        var r = self.runtime.rpc(is_async, to, msg) catch |err| {
+            std.debug.panic("[{d}] emitting an rpc call error {}: {}", .{ self.worker_id, msg, err });
+        };
+        return r;
+    }
+
+    /// call() makes a sync RPC call to another node. use .wait() or .timed_wait().
+    pub fn call(self: ScopedRuntime, to: []const u8, msg: anytype) *RPCRequest {
+        return self.rpc(false, to, msg);
+    }
+
+    /// call_async() makes an async RPC call to another node.
+    pub fn call_async(self: ScopedRuntime, to: []const u8, msg: anytype) *RPCRequest {
+        return self.rpc(true, to, msg);
     }
 
     pub fn neighbours(self: ScopedRuntime) NeighbourIterator {

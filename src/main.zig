@@ -8,6 +8,7 @@ pub const log = @import("log.zig");
 const runtime = @import("runtime.zig");
 pub const Runtime = runtime.Runtime;
 pub const ScopedRuntime = runtime.ScopedRuntime;
+pub const RPCRequest = runtime.Request;
 
 pub const proto = @import("protocol.zig");
 pub const Message = proto.Message;
