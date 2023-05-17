@@ -213,9 +213,17 @@ pub const Runtime = struct {
         var req = try self.rpc_runtime.new_req(is_async);
         var alloc = req.arena.allocator();
         var obj = try proto.merge_to_json(alloc, msg);
+
+        if (!try self.rpc_runtime.add(req)) {
+            // should not ever happen
+            return error.TryAgain;
+        }
+        errdefer self.rpc_runtime.remove(req.msg_id) catch {};
+
         try self.send(alloc, to, .{
             proto.MessageBody{ .typ = "", .msg_id = req.msg_id, .in_reply_to = 0, .raw = obj },
         });
+
         return req;
     }
 
@@ -283,9 +291,8 @@ pub const Runtime = struct {
 
         if (proto.parse_message(node.data.arena.allocator(), node.data.req)) |req| {
             var scoped = ScopedRuntime.init(self, node, id);
-            const is_init = std.mem.eql(u8, req.body.typ, "init");
-            const rpc_request = self.rpc_runtime.poll_request(req.body.in_reply_to);
 
+            const rpc_request = self.rpc_runtime.poll_request(req.body.in_reply_to);
             if (rpc_request) |item| {
                 // FIXME: any ideas how to move the whole tree to another arena?
                 //        we can't just pass the req with local lifetime (node.data.arena a') to the external lifetime b'.
@@ -304,6 +311,14 @@ pub const Runtime = struct {
                 }
             }
 
+            const is_err = std.mem.eql(u8, req.body.typ, "error");
+            if (is_err) {
+                // if it is an error response to rpc, we can't do anything about it.
+                std.log.err("[{d}] got error response {s}", .{ id, node.data.req });
+                return;
+            }
+
+            const is_init = std.mem.eql(u8, req.body.typ, "init");
             if (is_init) {
                 process_init_message(&scoped, req) catch |err| {
                     std.log.err("[{d}] processing init message error {s}: {}", .{ id, node.data.req, err });
@@ -315,7 +330,11 @@ pub const Runtime = struct {
             if (self.handlers.get(req.body.typ)) |f| {
                 f(scoped, req) catch |err| scoped.reply_err(req, err);
             } else if (!is_init) {
-                scoped.reply_err(req, HandlerError.NotSupported);
+                const is_ok = std.mem.endsWith(u8, req.body.typ, "_ok");
+                // if the msg is not an init and is not an ok response from rpc than yeah.
+                if (!is_ok) {
+                    scoped.reply_err(req, HandlerError.NotSupported);
+                }
                 return;
             }
 

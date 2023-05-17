@@ -162,3 +162,7 @@ test "simple queue" {
 
     try runtime.remove(req.msg_id);
 }
+
+test "no double free" {
+    // TODO: fix deinit from sync caller, then set_comp by resp
+}

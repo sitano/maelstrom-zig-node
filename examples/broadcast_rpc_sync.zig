@@ -29,18 +29,18 @@ fn broadcast(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
     if (storage.add(in.message) catch return m.Error.Abort) {
         var ns = self.neighbours();
         while (ns.next()) |node| {
-            var rpc = self.call(node, .{
-                .typ = "broadcast",
-                .message = in.message,
-            });
-            _ = rpc.wait();
-            rpc.deinit();
+            if (!std.mem.eql(u8, node, req.src)) {
+                var rpc = self.call(node, .{
+                    .typ = "broadcast",
+                    .message = in.message,
+                });
+                _ = rpc.wait();
+                rpc.deinit();
+            }
         }
     }
 
-    if (!self.is_cluster_node(req.src)) {
-        self.reply_ok(req);
-    }
+    self.reply_ok(req);
 }
 
 fn topology(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
