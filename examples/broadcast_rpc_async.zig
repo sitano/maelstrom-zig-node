@@ -1,4 +1,4 @@
-// zig build && ~/maelstrom/maelstrom test -w broadcast --bin ./zig-out/bin/broadcast_rpc_sync --node-count 2 --time-limit 20 --rate 10 --log-stderr
+// zig build && ~/maelstrom/maelstrom test -w broadcast --bin ./zig-out/bin/broadcast_rpc_async --node-count 2 --time-limit 20 --rate 10 --log-stderr
 
 const m = @import("maelstrom");
 const std = @import("std");
@@ -30,12 +30,10 @@ fn broadcast(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
         var ns = self.neighbours();
         while (ns.next()) |node| {
             if (!std.mem.eql(u8, node, req.src)) {
-                var rpc = self.call(node, .{
+                _ = self.call_async(node, .{
                     .typ = "broadcast",
                     .message = in.message,
                 });
-                _ = rpc.wait();
-                rpc.deinit();
             }
         }
     }
