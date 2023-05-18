@@ -34,8 +34,8 @@ fn broadcast(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
                     .typ = "broadcast",
                     .message = in.message,
                 });
+                defer rpc.deinit();
                 _ = rpc.wait();
-                rpc.deinit();
             }
         }
     }

@@ -214,11 +214,24 @@ pub const Runtime = struct {
         var alloc = req.arena.allocator();
         var obj = try proto.merge_to_json(alloc, msg);
 
+        if (!is_async) {
+            req.add_ref();
+        }
+        errdefer {
+            if (!is_async) {
+                req.deinit();
+            }
+        }
+
         if (!try self.rpc_runtime.add(req)) {
             // should not ever happen
             return error.TryAgain;
         }
-        errdefer self.rpc_runtime.remove(req.msg_id) catch {};
+
+        errdefer {
+            self.rpc_runtime.remove(req.msg_id);
+            req.deinit();
+        }
 
         try self.send(alloc, to, .{
             proto.MessageBody{ .typ = "", .msg_id = req.msg_id, .in_reply_to = 0, .raw = obj },
@@ -233,8 +246,8 @@ pub const Runtime = struct {
     }
 
     /// call_async() makes an async RPC call to another node.
-    pub fn call_async(self: *Runtime, to: []const u8, msg: anytype) !*RPCRequest {
-        return try self.rpc(true, to, msg);
+    pub fn call_async(self: *Runtime, to: []const u8, msg: anytype) !u64 {
+        return try self.rpc(true, to, msg).msg_id;
     }
 
     // in: std.io.Reader.{}
@@ -293,6 +306,10 @@ pub const Runtime = struct {
             var scoped = ScopedRuntime.init(self, node, id);
 
             const rpc_request = self.rpc_runtime.poll_request(req.body.in_reply_to);
+            // defer is scoped, so deinit defer here.
+            defer if (rpc_request) |item| {
+                item.deinit();
+            };
             if (rpc_request) |item| {
                 // FIXME: any ideas how to move the whole tree to another arena?
                 //        we can't just pass the req with local lifetime (node.data.arena a') to the external lifetime b'.
@@ -303,10 +320,7 @@ pub const Runtime = struct {
                     std.debug.panic("[{d}] rpc response parsing error {s}: {}", .{ id, node.data.req, err });
                 }
 
-                if (item.is_async) {
-                    defer item.arena.deinit();
-                } else {
-                    // for cleaning responsible the waiting thread.
+                if (!item.is_async) {
                     return;
                 }
             }
@@ -473,8 +487,8 @@ pub const ScopedRuntime = struct {
     }
 
     /// call_async() makes an async RPC call to another node.
-    pub fn call_async(self: ScopedRuntime, to: []const u8, msg: anytype) *RPCRequest {
-        return self.rpc(true, to, msg);
+    pub fn call_async(self: ScopedRuntime, to: []const u8, msg: anytype) u64 {
+        return self.rpc(true, to, msg).msg_id;
     }
 
     pub fn neighbours(self: ScopedRuntime) NeighbourIterator {

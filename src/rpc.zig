@@ -13,6 +13,9 @@ pub const Request = struct {
     notify: std.Thread.Condition,
     m: std.Thread.Mutex,
     completed: bool,
+    // usage count for counting users before deallocating arena.
+    // is needed because it is used by both caller and requests handler (main loop).
+    rc: usize,
     // must be allocated on local arena, and available by completion.
     resp: *proto.Message,
 
@@ -25,12 +28,37 @@ pub const Request = struct {
             .notify = std.Thread.Condition{},
             .m = std.Thread.Mutex{},
             .completed = false,
+            .rc = 0,
             .resp = undefined,
         };
     }
 
     pub fn deinit(self: *Request) void {
-        self.arena.deinit();
+        self.m.lock();
+        if (self.rc == std.math.maxInt(usize)) {
+            std.debug.panic("rpc() msg deinit() called over unitializaed arena", .{});
+        }
+        if (self.rc > 0) {
+            self.rc -= 1;
+        }
+        var rel = false;
+        var arena = self.arena;
+        if (self.rc == 0) {
+            rel = true;
+            self.rc = std.math.maxInt(usize);
+        }
+        self.m.unlock();
+
+        if (rel) {
+            arena.deinit();
+            // Request memory is released at this point.
+        }
+    }
+
+    pub fn add_ref(self: *Request) void {
+        self.m.lock();
+        defer self.m.unlock();
+        self.rc += 1;
     }
 
     pub fn is_completed(self: *Request) bool {
@@ -91,6 +119,9 @@ pub const Runtime = struct {
     pub fn deinit(self: *Runtime) void {
         self.m.lock();
         defer self.m.unlock();
+        if (self.reqs.count() > 0) {
+            std.log.warn("{d} rpc requests left in the queue", .{self.reqs.count()});
+        }
         self.reqs.deinit();
     }
 
@@ -107,25 +138,28 @@ pub const Runtime = struct {
     }
 
     pub fn add(self: *Runtime, req: *Request) !bool {
+        req.add_ref();
+        errdefer req.deinit();
+
         self.m.lock();
-        defer self.m.unlock();
 
         if (self.reqs.contains(req.msg_id)) {
+            self.m.unlock();
+            req.deinit();
             return false;
         }
 
+        defer self.m.unlock();
         try self.reqs.put(req.msg_id, req);
 
         return true;
     }
 
-    pub fn remove(self: *Runtime, req_id: u64) !void {
+    pub fn remove(self: *Runtime, req_id: u64) void {
         self.m.lock();
         defer self.m.unlock();
 
-        if (self.reqs.get(req_id)) |req| {
-            req.arena.deinit();
-        }
+        _ = self.reqs.remove(req_id);
     }
 
     /// when you get a request, you are responsible for cleaning up the arena.
@@ -160,9 +194,39 @@ test "simple queue" {
     var resp2 = req.wait();
     try std.testing.expectEqual(resp, resp2);
 
-    try runtime.remove(req.msg_id);
+    runtime.remove(req.msg_id);
 }
 
 test "no double free" {
-    // TODO: fix deinit from sync caller, then set_comp by resp
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    var msg = Request.init(arena, 1);
+    msg.deinit();
+    // TODO: how to expect panic from msg.deinit();
+}
+
+test "sync is double ref" {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    var alloc = arena.allocator();
+
+    var runtime = try Runtime.init(alloc);
+    defer runtime.deinit();
+
+    var req = try runtime.new_req(false);
+    try std.testing.expectEqual(true, try runtime.add(req));
+    defer req.deinit();
+
+    req.add_ref(); // return sync call to caller
+    req.deinit(); // caller leaved
+
+    var resp = try req.arena.allocator().create(proto.Message);
+    req.set_completed(resp);
+
+    var resp2 = req.wait();
+    try std.testing.expectEqual(resp, resp2);
+
+    runtime.remove(req.msg_id);
 }
