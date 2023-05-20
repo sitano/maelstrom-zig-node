@@ -12,11 +12,11 @@ violated. With maelstrom you build nodes that form distributed system that can p
 ## Features
 
 - zig 0.10.1 + mt
-- simple API
+- Runtime API
 - response types auto-deduction, extra data available via Value()
 - unknown message types handling
-- TODO: a/sync RPC() support + timeout / context
-- TODO: lin/seq/lww kv storage
+- a/sync RPC() support + timeout / context
+- lin/seq/lww kv storage
 
 ## Examples
 
@@ -135,7 +135,7 @@ fn topology(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
 ### lin-kv workload
 
 ```sh
-RUST_LOG=debug ~/maelstrom/maelstrom test -w lin-kv --bin ./target/debug/examples/lin_kv --node-count 4 --concurrency 2n --time-limit 10 --rate 100 --log-stderr
+zig build && ~/maelstrom/maelstrom test -w lin-kv --bin ./zig-out/bin/lin_kv --node-count 4 --concurrency 2n --time-limit 20 --rate 100 --log-stderr
 ```
 
 implementation:
@@ -147,7 +147,7 @@ implementation:
 ### g-set workload
 
 ```sh
-RUST_LOG=debug ~/Projects/maelstrom/maelstrom test -w g-set --bin ./target/debug/examples/g_set --node-count 2 --concurrency 2n --time-limit 20 --rate 10 --log-stderr
+zig build && ~/maelstrom/maelstrom test -w g-set --bin ./zig-out/bin/g_set --node-count 2 --concurrency 2n --time-limit 20 --rate 10 --log-stderr
 ```
 
 implementation:

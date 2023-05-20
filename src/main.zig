@@ -17,6 +17,8 @@ pub const MessageBody = proto.MessageBody;
 pub const errors = @import("error.zig");
 pub const Error = errors.HandlerError;
 
+pub const kv = @import("kv.zig");
+
 // we did like to use async io but it does not work at least until 0.12.0.
 // see protocol format() issues and mutex+async_print+darwin.
 //
