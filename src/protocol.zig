@@ -35,6 +35,7 @@ pub const ErrorMessageBody = struct {
     text: []const u8,
 
     pub usingnamespace FormatAsJson(@This());
+    pub usingnamespace ErrorMessageMethods(@This());
 };
 
 // buf must be allocated on arena. we would not clean or copy it.
@@ -46,7 +47,16 @@ fn MessageMethods(comptime Self: type) type {
     return struct {
         // buf must be allocated on arena. we would not clean or copy it.
         pub fn parse_into_arena(alloc: std.mem.Allocator, buf: []u8) !*Message {
-            var parser = std.json.Parser.init(alloc, false);
+            // FIXME: with copy_strings == false, some rpc resp reads fail after
+            //        being passed over the threads boundary. wut???.
+            //
+            //        runtime.rpc:
+            //
+            //        if (proto.parse_message(item.arena.allocator(), node.data.req)) |resp|
+            //           item.set_completed(resp);
+            //
+            //        test: zig build && ~/maelstrom/maelstrom test -w lin-kv --bin ./zig-out/bin/lin_kv --node-count 4 --concurrency 2n --time-limit 20 --rate 100 --log-stderr
+            var parser = std.json.Parser.init(alloc, true);
             defer parser.deinit();
 
             var tree = try parser.parse(buf);
@@ -153,6 +163,29 @@ fn MessageBodyMethods(comptime Self: type) type {
     };
 }
 
+fn ErrorMessageMethods(comptime Self: type) type {
+    return struct {
+        pub fn init() ErrorMessageBody {
+            return ErrorMessageBody{
+                .typ = "error",
+                .code = 0,
+                .text = "",
+            };
+        }
+
+        pub fn from_json(self: *Self, src0: ?std.json.Value) !*ErrorMessageBody {
+            if (src0 == null) return self;
+            const src = src0.?;
+
+            self.typ = try_json_string(src.Object.get("type"));
+            self.code = try_json_i64(src.Object.get("code"));
+            self.text = try_json_string(src.Object.get("text"));
+
+            return self;
+        }
+    };
+}
+
 fn FormatAsJson(comptime Self: type) type {
     return struct {
         pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -176,6 +209,14 @@ fn try_json_u64(val: ?std.json.Value) u64 {
     if (val == null) return 0;
     switch (val.?) {
         .Integer => |s| return @intCast(u64, s),
+        else => return 0,
+    }
+}
+
+fn try_json_i64(val: ?std.json.Value) i64 {
+    if (val == null) return 0;
+    switch (val.?) {
+        .Integer => |s| return @intCast(i64, s),
         else => return 0,
     }
 }
@@ -251,9 +292,10 @@ pub fn to_json_value(alloc: std.mem.Allocator, value: anytype) !std.json.Value {
     //
     //        This is fixed in main, see
     //        https://github.com/ziglang/zig/commit/b42caff2a20eb34073f6a766f55d27288028165a.
-    //        
+    //
     //        But we want to support at least 0.10.0.
-    var t = obj.root; t.Object.allocator = alloc;
+    var t = obj.root;
+    t.Object.allocator = alloc;
 
     // Now we must transform all .typ fields into .type fields, as Zig don't have tags.
     try rename_typ_field(&t);
@@ -277,7 +319,7 @@ fn rename_typ_field(o: *std.json.Value) !void {
                 try rename_typ_field(entry.value_ptr);
             }
         },
-        else => {}
+        else => {},
     }
 }
 
@@ -327,7 +369,10 @@ pub fn json_map_obj(comptime T: type, alloc: std.mem.Allocator, src: anytype) !T
     const srcObj = try to_json_value(alloc, src);
     const srcStr = try std.json.stringifyAlloc(alloc, srcObj, .{});
     var stream = std.json.TokenStream.init(srcStr);
-    return try std.json.parse(T, &stream, .{ .allocator = alloc, .ignore_unknown_fields = true, });
+    return try std.json.parse(T, &stream, .{
+        .allocator = alloc,
+        .ignore_unknown_fields = true,
+    });
 }
 
 test "to_json(.{})" {
@@ -340,15 +385,17 @@ test "to_json(.{})" {
             .Object => {},
             else => try std.testing.expect(false),
         }
-        
+
         var str = try std.json.stringifyAlloc(arena.allocator(), obj, .{});
         try std.testing.expectEqualSlices(u8, "{}", str);
     }
 
     {
-        const obj = std.json.Value{ .Object = std.json.ObjectMap.init(arena.allocator()), };
+        const obj = std.json.Value{
+            .Object = std.json.ObjectMap.init(arena.allocator()),
+        };
         var res = try to_json_value(arena.allocator(), obj);
-        try std.testing.expectEqual(obj, res);    
+        try std.testing.expectEqual(obj, res);
     }
 }
 

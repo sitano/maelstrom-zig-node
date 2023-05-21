@@ -19,9 +19,10 @@ pub fn main() !void {
 fn read(self: m.ScopedRuntime, req: *m.Message) m.Error!void {
     const in = m.proto.json_map_obj(Read, self.alloc, req.body) catch return m.Error.MalformedRequest;
     const key = std.fmt.allocPrint(self.alloc, "{}", .{in.key}) catch return m.Error.Crash;
+    const val = try kv.get(self, key, 0);
 
     self.reply(req, ReadOk{
-        .value = try kv.get(self, key, i64, 0),
+        .value = val.Integer,
     });
 }
 

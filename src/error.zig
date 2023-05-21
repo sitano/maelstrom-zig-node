@@ -2,7 +2,7 @@ const std = @import("std");
 const proto = @import("protocol.zig");
 
 /// [source](https://github.com/jepsen-io/maelstrom/blob/main/doc/protocol.md#errors).
-pub const HandlerError = error {
+pub const HandlerError = error{
     /// Indicates that the requested operation could not be completed within a timeout.
     Timeout,
     /// Use this error to indicate that a requested operation is not supported by
@@ -50,47 +50,63 @@ pub const HandlerError = error {
 };
 
 pub fn to_code(err: HandlerError) i64 {
-  return switch (err) {
-    error.Timeout => 0,
-    error.NotSupported => 10,
-    error.TemporarilyUnavailable => 11,
-    error.MalformedRequest => 12,
-    error.Crash => 13,
-    error.Abort => 14,
-    error.KeyDoesNotExist => 20,
-    error.KeyAlreadyExists => 21,
-    error.PreconditionFailed => 22,
-    error.TxnConflict => 30,
-    error.Other => 1000,
-  };
+    return switch (err) {
+        error.Timeout => 0,
+        error.NotSupported => 10,
+        error.TemporarilyUnavailable => 11,
+        error.MalformedRequest => 12,
+        error.Crash => 13,
+        error.Abort => 14,
+        error.KeyDoesNotExist => 20,
+        error.KeyAlreadyExists => 21,
+        error.PreconditionFailed => 22,
+        error.TxnConflict => 30,
+        error.Other => 1000,
+    };
+}
+
+pub fn to_err(code: i64) HandlerError {
+    return switch (code) {
+        0 => error.Timeout,
+        10 => error.NotSupported,
+        11 => error.TemporarilyUnavailable,
+        12 => error.MalformedRequest,
+        13 => error.Crash,
+        14 => error.Abort,
+        20 => error.KeyDoesNotExist,
+        21 => error.KeyAlreadyExists,
+        22 => error.PreconditionFailed,
+        30 => error.TxnConflict,
+        else => error.Other,
+    };
 }
 
 pub fn to_text(err: HandlerError) []const u8 {
-  return switch (err) {
-    error.Timeout => "timeout",
-    error.NotSupported => "not supported",
-    error.TemporarilyUnavailable => "temporarily unavailable",
-    error.MalformedRequest => "malformed request",
-    error.Crash => "crash",
-    error.Abort => "abort",
-    error.KeyDoesNotExist => "key does not exist",
-    error.KeyAlreadyExists => "key already exists",
-    error.PreconditionFailed => "precondition failed",
-    error.TxnConflict => "txn conflict",
-    error.Other => "user-level error kind",
-  };
+    return switch (err) {
+        error.Timeout => "timeout",
+        error.NotSupported => "not supported",
+        error.TemporarilyUnavailable => "temporarily unavailable",
+        error.MalformedRequest => "malformed request",
+        error.Crash => "crash",
+        error.Abort => "abort",
+        error.KeyDoesNotExist => "key does not exist",
+        error.KeyAlreadyExists => "key already exists",
+        error.PreconditionFailed => "precondition failed",
+        error.TxnConflict => "txn conflict",
+        error.Other => "user-level error kind",
+    };
 }
 
 pub fn to_message(err: HandlerError) proto.ErrorMessageBody {
-  return proto.ErrorMessageBody {
-    .typ = "error",
-    .code = to_code(err),
-    .text = to_text(err),
-  };
+    return proto.ErrorMessageBody{
+        .typ = "error",
+        .code = to_code(err),
+        .text = to_text(err),
+    };
 }
 
 test "error mapping works" {
-  try std.testing.expect(to_code(HandlerError.NotSupported) == 10);
-  try std.testing.expect(std.mem.eql(u8, to_text(HandlerError.NotSupported), "not supported"));
-  try std.testing.expect(to_message(HandlerError.NotSupported).code == 10);
+    try std.testing.expect(to_code(HandlerError.NotSupported) == 10);
+    try std.testing.expect(std.mem.eql(u8, to_text(HandlerError.NotSupported), "not supported"));
+    try std.testing.expect(to_message(HandlerError.NotSupported).code == 10);
 }
